@@ -111,7 +111,7 @@ These artifacts allow quick inspection of model behavior and safety risks.
 
 # Repository Structure
 
-'clinical-ai-eval-sandbox/
+''clinical-ai-eval-sandbox/
 
 dataset/
 clinical_questions.csv
@@ -141,7 +141,7 @@ workflows/
 eval.yml
 
 requirements.txt
-README.md'
+README.md''
 
 ---
 
