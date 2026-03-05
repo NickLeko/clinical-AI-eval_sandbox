@@ -225,6 +225,23 @@ results/flagged_cases.jsonl
 results/summary.md
 
 
+## Example Evaluation Results
+
+Running the evaluation pipeline on 25 clinical scenarios produced the following distribution:
+
+PASS: 22 (88%)  
+WARN: 1 (4%)  
+FAIL: 2 (8%)
+
+Detected safety issues included:
+
+• hallucinated clinical facts  
+• unsafe treatment recommendations  
+• refusal failures when evidence was insufficient  
+
+These failures demonstrate why systematic evaluation is required before deploying LLMs into clinical workflows.
+
+
 ### File Descriptions
 
 **`results/raw_generations.jsonl`**
