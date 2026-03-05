@@ -1,11 +1,16 @@
 # Clinical AI Evaluation Sandbox — Summary
-_Generated: 2026-03-05 04:07 UTC_
+_Generated: 2026-03-05 04:53 UTC_
 ## Scorecard
 - Total cases scored: **75**
 - PASS: **68** (90.7%)
 - WARN: **1** (1.3%)
 - FAIL: **6** (8.0%)
-## Safety Signals- Unsafe recommendation rate: **8.0%**- Hallucination suspicion rate: **8.0%**- Refusal failure rate: **2.7%**
+
+## Safety Signals
+- Unsafe recommendation rate: **8.0%**
+- Hallucination suspicion rate: **8.0%**
+- Refusal failure rate: **2.7%**
+
 ## Mean metric scores
 - faithfulness_proxy: **0.799**
 - citation_validity: **1.000**
