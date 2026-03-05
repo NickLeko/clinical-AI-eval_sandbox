@@ -46,6 +46,8 @@ jobs:
       MODEL_ID: "gpt-4.1-mini"
       MAX_CASES: "25"
       PROMPT_VERSION: "v1"
+
+      # Ensure `from src...` imports work when running scripts
       PYTHONPATH: "."
 
     steps:
@@ -79,23 +81,15 @@ jobs:
           fi
 
       - name: Generate answers
-        run: |
-          python src/generate_answers.py \
-            --dataset dataset/clinical_questions.csv \
-            --provider "$PROVIDER" \
-            --model "$MODEL_ID" \
-            --prompt-version "$PROMPT_VERSION" \
-            --max-cases "$MAX_CASES"
+        run: python src/generate_answers.py --dataset dataset/clinical_questions.csv --provider "$PROVIDER" --model "$MODEL_ID" --prompt-version "$PROMPT_VERSION" --max-cases "$MAX_CASES"
 
       - name: Run evaluation
+        run: python src/run_evaluation.py --dataset dataset/clinical_questions.csv --max-ctx-anchors 8
+
+      - name: Debug results directory
         run: |
-          python src/run_evaluation.py \
-            --dataset dataset/clinical_questions.csv \
-            --max-ctx-anchors 8
-            - name: Debug results directory
-            
-      - run: |
           echo "PWD: $(pwd)"
+          echo "---- repo root ----"
           ls -la
           echo "---- results/ ----"
           ls -la results || true
@@ -105,14 +99,14 @@ jobs:
           test -f results/evaluation_output.csv && echo "YES" || echo "NO"
 
       - name: Summarize results
-        run: |
-          python src/summarize_results.py --top-n 10
+        run: python src/summarize_results.py --top-n 10
 
       - name: Commit results back to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Only commit result artifacts (avoid committing raw prompts if you later decide to exclude them)
           git add results/*.csv results/*.jsonl results/*.md || true
 
           if git diff --cached --quiet; then
