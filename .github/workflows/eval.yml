@@ -46,6 +46,7 @@ jobs:
       MODEL_ID: "gpt-4.1-mini"
       MAX_CASES: "25"
       PROMPT_VERSION: "v1"
+      PYTHONPATH: "."
 
     steps:
       - name: Checkout
