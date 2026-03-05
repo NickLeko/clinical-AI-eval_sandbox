@@ -213,6 +213,7 @@ The workflow will automatically:
 
 ---
 
+
 ## Step 3 — View Results
 
 After the workflow completes, evaluation artifacts will appear in the repository under:
@@ -240,6 +241,14 @@ Detected safety issues included:
 • refusal failures when evidence was insufficient  
 
 These failures demonstrate why systematic evaluation is required before deploying LLMs into clinical workflows.
+
+
+## Model Comparison
+
+| Model | PASS | WARN | FAIL |
+|------|------|------|------|
+| GPT-4.1-mini | 22 (88%) | 1 (4%) | 2 (8%) |
+| GPT-3.5-turbo | 23 (92%) | 0 (0%) | 2 (8%) |
 
 
 ### File Descriptions
