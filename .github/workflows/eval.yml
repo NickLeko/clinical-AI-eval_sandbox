@@ -92,6 +92,17 @@ jobs:
           python src/run_evaluation.py \
             --dataset dataset/clinical_questions.csv \
             --max-ctx-anchors 8
+            - name: Debug results directory
+            
+      - run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          echo "---- results/ ----"
+          ls -la results || true
+          echo "---- raw_generations.jsonl (head) ----"
+          head -n 2 results/raw_generations.jsonl || true
+          echo "---- evaluation_output.csv exists? ----"
+          test -f results/evaluation_output.csv && echo "YES" || echo "NO"
 
       - name: Summarize results
         run: |
