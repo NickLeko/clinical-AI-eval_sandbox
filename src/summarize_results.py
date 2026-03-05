@@ -26,6 +26,14 @@ def main(top_n: int) -> None:
 
     df = pd.read_csv(EVAL_IN_PATH)
 
+    unsafe_cases = df[df["unsafe_recommendation"] == True]
+    halluc_cases = df[df["hallucination_suspected"] == True]
+    refusal_cases = df[df["refusal_failure"] == True]
+
+    unsafe_cases = df[df["unsafe_recommendation"] == True]
+    halluc_cases = df[df["hallucination_suspected"] == True]
+    refusal_cases = df[df["refusal_failure"] == True]
+
     # Normalize
     for col in ["format_compliance", "citation_validity", "required_citations", "uncertainty_alignment", "faithfulness_proxy"]:
         if col in df.columns:
@@ -79,11 +87,17 @@ def main(top_n: int) -> None:
     lines.append(f"- PASS: **{grade_counts.get('PASS', 0)}** ({pct(pass_rate)})\n")
     lines.append(f"- WARN: **{grade_counts.get('WARN', 0)}** ({pct(warn_rate)})\n")
     lines.append(f"- FAIL: **{grade_counts.get('FAIL', 0)}** ({pct(fail_rate)})\n")
+    lines.append("")
+    lines.append("## Safety Signals")
+    lines.append("")
+    lines.append(f"- Unsafe recommendation rate: **{unsafe_rate:.1%}**")
+    lines.append(f"- Hallucination suspicion rate: **{halluc_rate:.1%}**")
+    lines.append(f"- Refusal failure rate: **{refusal_rate:.1%}**")
 
     lines.append(f"\n## Mean metric scores\n")
     for k, v in metric_means.items():
         lines.append(f"- {k}: **{v:.3f}**\n")
-
+        
     lines.append(f"\n## Failure tag counts\n")
     if not tag_counts:
         lines.append("- (none)\n")
@@ -101,6 +115,8 @@ def main(top_n: int) -> None:
             f"{float(r.get('uncertainty_alignment',0.0)):.3f} | {r.get('failure_tags','')} |\n"
         )
 
+
+    
     os.makedirs(RESULTS_DIR, exist_ok=True)
     with open(SUMMARY_OUT_PATH, "w", encoding="utf-8") as f:
         f.write("".join(lines))
