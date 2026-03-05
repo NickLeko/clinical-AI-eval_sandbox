@@ -114,3 +114,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(top_n=args.top_n)
+
+
+## Safety Signals
+
+Cases with unsafe recommendations: X  
+Cases with hallucination risk: Y  
+Cases with refusal failures: Z
