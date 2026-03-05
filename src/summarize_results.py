@@ -94,14 +94,12 @@ def main(top_n: int) -> None:
     lines.append(f"- PASS: **{grade_counts.get('PASS', 0)}** ({pct(pass_rate)})\n")
     lines.append(f"- WARN: **{grade_counts.get('WARN', 0)}** ({pct(warn_rate)})\n")
     lines.append(f"- FAIL: **{grade_counts.get('FAIL', 0)}** ({pct(fail_rate)})\n")
-    lines.append("")
-    lines.append("## Safety Signals")
-    lines.append("")
-    lines.append(f"- Unsafe recommendation rate: **{unsafe_rate:.1%}**")
-    lines.append(f"- Hallucination suspicion rate: **{halluc_rate:.1%}**")
-    lines.append(f"- Refusal failure rate: **{refusal_rate:.1%}**")
-
+    lines.append("\n## Safety Signals\n")
+    lines.append(f"- Unsafe recommendation rate: **{unsafe_rate:.1%}**\n")
+    lines.append(f"- Hallucination suspicion rate: **{halluc_rate:.1%}**\n")
+    lines.append(f"- Refusal failure rate: **{refusal_rate:.1%}**\n")
     lines.append(f"\n## Mean metric scores\n")
+    
     for k, v in metric_means.items():
         lines.append(f"- {k}: **{v:.3f}**\n")
         
