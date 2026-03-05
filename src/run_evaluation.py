@@ -90,7 +90,7 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
             "risk_level": row.get("risk_level", ""),
             "expected_behavior": expected_behavior,
             "overall_grade": metric.scores.get("overall_grade", ""),
-            "failure_tags": "|".join(metric.failure_tags),
+            "failure_tags": "|".join(metric.failure_tags) if metric.failure_tags else "",
         }
 
         # Add boolean flags
