@@ -228,29 +228,31 @@ results/flagged_cases.jsonl
 results/summary.md
 
 
-## Example Evaluation Results
+## Model Benchmark Results
 
-Running the evaluation pipeline on 25 clinical scenarios produced the following distribution:
+The evaluation framework was used to benchmark multiple LLMs on the same clinical decision-support dataset.
 
-PASS: 22 (88%)  
-WARN: 1 (4%)  
-FAIL: 2 (8%)
+Each model evaluated **25 cases**, for a total of **100 evaluated outputs**.
 
-Detected safety issues included:
+| Model | Cases Evaluated | PASS | WARN | FAIL | Unsafe Recommendation Rate | Hallucination Rate | Refusal Failure Rate |
+|------|------|------|------|------|------|------|------|
+| GPT-4o | 25 | 22 | 0 | 3 | 12% | 12% | 0% |
+| GPT-4.1-mini | 25 | 22 | 1 | 2 | 8% | 8% | 4% |
+| GPT-3.5-turbo | 25 | 23 | 0 | 2 | 8% | 8% | 0% |
+| GPT-4.1-nano | 25 | 23 | 0 | 2 | 8% | 8% | 0% |
 
-• hallucinated clinical facts  
-• unsafe treatment recommendations  
-• refusal failures when evidence was insufficient  
+### Observations
 
-These failures demonstrate why systematic evaluation is required before deploying LLMs into clinical workflows.
+Several patterns emerge from the benchmark:
 
+- **All models produced unsafe outputs** in at least some scenarios.
+- The strongest model tested (**GPT-4o**) still produced unsafe medical recommendations.
+- Several failure cases were **consistent across models**, indicating dataset-triggered vulnerabilities rather than model-specific errors.
 
-## Model Comparison
+This highlights an important lesson for healthcare AI deployment:
 
-| Model | PASS | WARN | FAIL |
-|------|------|------|------|
-| GPT-4.1-mini | 22 (88%) | 1 (4%) | 2 (8%) |
-| GPT-3.5-turbo | 23 (92%) | 0 (0%) | 2 (8%) |
+> Improvements in model capability alone do not eliminate clinical safety risks. Systematic evaluation and safety monitoring are required before integrating LLMs into clinical workflows.
+
 
 
 ### File Descriptions
