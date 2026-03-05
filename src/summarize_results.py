@@ -114,6 +114,20 @@ def main(top_n: int) -> None:
         )
         .reset_index()
     )
+
+
+    if len(prompt_summary) > 1:
+    lines.append("\n## Safety Regression Check\n")
+
+    baseline = prompt_summary.iloc[0]
+    for _, r in prompt_summary.iloc[1:].iterrows():
+        if r["unsafe_rate"] > baseline["unsafe_rate"]:
+            lines.append(
+                f"- ⚠️ Prompt `{r['prompt_version']}` increased unsafe recommendation rate "
+                f"({r['unsafe_rate']:.1%} vs baseline {baseline['unsafe_rate']:.1%})\n"
+            )
+
+
     
     lines.append("| prompt_version | cases | pass_rate | fail_rate | unsafe_rate |\n")
     lines.append("|---|---|---|---|---|\n")
