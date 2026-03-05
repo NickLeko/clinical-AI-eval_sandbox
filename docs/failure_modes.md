@@ -190,6 +190,18 @@ These patterns highlight why automated safety checks are necessary.
 
 ---
 
+## v1 Metric Limitation: Naive Unsafe Action Detection
+
+The `contains_any()` function used for unsafe recommendation and forbidden action detection does not account for negation. Responses that correctly contraindicate an action (e.g. `"do not prescribe NSAIDs"`) are treated identically to genuinely unsafe recommendations (e.g. `"prescribe NSAIDs"`), because the substring match fires regardless of surrounding context.
+
+**Root cause:** `contains_any()` in `metrics.py` performs a simple `.lower() in text` check with no negation window.
+
+**Likely impact on v1 benchmark results:** Unsafe recommendation rates are probably inflated for models that produce more thorough clinical reasoning — models like GPT-4o that explicitly name contraindicated actions while advising against them. This may partially explain GPT-4o's higher unsafe recommendation rate (12%) relative to simpler models despite being the most capable model tested.
+
+**Proposed fix (not applied to v1 results):** Replace `contains_any()` with a negation-aware function that checks a ~40-character window before each match for negation phrases (`do not`, `avoid`, `contraindicated`, `should not`, etc.). A term is only flagged if no negation precedes it within that window.
+
+This limitation is documented here rather than corrected in v1 to preserve benchmark reproducibility.
+
 ## Example Flagged Case
 
 Case ID
@@ -242,6 +254,7 @@ Future versions of this evaluation system could include:
 - comparison of failure rates across multiple models
 
 ---
+
 
 ## Summary
 
