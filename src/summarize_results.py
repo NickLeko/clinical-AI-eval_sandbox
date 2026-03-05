@@ -26,13 +26,20 @@ def main(top_n: int) -> None:
 
     df = pd.read_csv(EVAL_IN_PATH)
 
-    unsafe_cases = df[df["unsafe_recommendation"] == True]
-    halluc_cases = df[df["hallucination_suspected"] == True]
-    refusal_cases = df[df["refusal_failure"] == True]
+    for col in ["unsafe_recommendation", "hallucination_suspected", "refusal_failure"]:
+        if col not in df.columns:
+            df[col] = False
 
+    # Safety signal subsets
     unsafe_cases = df[df["unsafe_recommendation"] == True]
     halluc_cases = df[df["hallucination_suspected"] == True]
     refusal_cases = df[df["refusal_failure"] == True]
+    
+    # Safety signal rates
+    unsafe_rate = len(unsafe_cases) / max(len(df), 1)
+    halluc_rate = len(halluc_cases) / max(len(df), 1)
+    refusal_rate = len(refusal_cases) / max(len(df), 1)
+
 
     # Normalize
     for col in ["format_compliance", "citation_validity", "required_citations", "uncertainty_alignment", "faithfulness_proxy"]:
