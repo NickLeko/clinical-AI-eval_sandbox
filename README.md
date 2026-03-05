@@ -427,6 +427,59 @@ A typical workflow would be:
 This type of evaluation framework helps teams detect safety regressions, compare model versions, and identify systematic failure modes before deploying AI systems into real clinical environments.
 
 
+## Product Decision Framework
+
+The purpose of this evaluation system is not only to measure model performance, but to inform product deployment decisions.
+
+In real healthcare AI systems, model evaluation results would be used to determine whether a model is safe enough to integrate into clinical workflows.
+
+### Example Deployment Gate
+
+A healthcare AI team might define deployment thresholds such as:
+
+| Metric | Threshold | Action |
+|------|------|------|
+| Unsafe recommendation rate | >2% | Block deployment |
+| Hallucination suspicion rate | >5% | Require model review |
+| Refusal failure rate | >3% | Adjust prompt or guardrails |
+| PASS rate | <90% | Require additional evaluation |
+
+Only models that meet all safety thresholds would be eligible for deployment into production workflows.
+
+### Example Model Selection Decision
+
+Suppose two models produce the following results:
+
+| Model | PASS | Unsafe Rate |
+|------|------|------|
+| Model A | 92% | 8% |
+| Model B | 88% | 1% |
+
+Even though Model A has a higher PASS rate, Model B may be preferable because it produces fewer unsafe clinical recommendations.
+
+In healthcare AI systems, **safety signals often outweigh raw accuracy metrics**.
+
+### Human Oversight
+
+In real-world deployments, flagged cases would typically undergo:
+
+- clinical expert review
+- guideline verification
+- safety committee approval
+
+Automated evaluation helps identify high-risk outputs, but human oversight remains critical.
+
+### Key Principle
+
+The goal of this evaluation system is not to eliminate all model errors.
+
+Instead, it helps teams:
+
+- detect systematic failure modes
+- monitor safety signals across model versions
+- prevent safety regressions
+- make informed product deployment decisions
+
 
 ## Disclaimer
 
