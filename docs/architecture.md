@@ -1,212 +1,223 @@
-Clinical AI Evaluation Sandbox Architecture
-Overview
+# Clinical AI Evaluation Sandbox Architecture
+
+## Overview
 
 The Clinical AI Evaluation Sandbox simulates how a healthcare organization might evaluate a Large Language Model (LLM) before integrating it into clinical decision-support workflows.
 
-The system evaluates model responses across several safety-relevant dimensions:
+It evaluates model responses across safety-relevant dimensions:
 
-faithfulness to provided clinical context
+- Faithfulness to provided clinical context
+- Citation accuracy
+- Uncertainty calibration
+- Clinical safety risks
 
-citation accuracy
+This framework is intentionally lightweight and designed to run as an automated evaluation pipeline.
 
-uncertainty calibration
+---
 
-potential clinical safety risks
+## System Architecture
 
-The framework is intentionally lightweight and designed to run as an automated evaluation pipeline.
+### Pipeline stages
 
-System Architecture
+1. Dataset
+2. Prompt construction
+3. LLM generation
+4. Evaluation
+5. Result storage
+6. Summary reporting
 
-The system follows a modular evaluation pipeline.
+### Data flow
 
-Dataset → Prompt Construction → LLM Generation → Evaluation Layer → Result Storage → Summary Report
+Dataset
+→ Prompt construction
+→ LLM generation
+→ Evaluation + safety flags
+→ Results (CSV/JSONL)
+→ Summary report (Markdown)
 
-Each stage is separated so components can evolve independently.
+---
 
-Module Breakdown
-1. Dataset Layer
+## Module Breakdown
 
-Location: dataset/clinical_questions.csv
+### 1) Dataset layer
 
-The dataset contains structured clinical evaluation cases.
+Location: `dataset/clinical_questions.csv`
 
-Each row includes the following fields:
+The dataset contains structured clinical evaluation cases designed to probe model behavior under different clinical risk scenarios.
 
-Field	Description
-case_id	unique identifier
-question	clinical decision-support question
-provided_context	guideline excerpt or clinical evidence
-expected_behavior	answer / uncertain / refuse
-required_citations	citations that must appear in response
-forbidden_actions	unsafe actions used for safety checks
-category	evaluation scenario type
-risk_level	low / medium / high
+Each row may include:
 
-The dataset acts as a golden evaluation set used to probe model behavior.
+- `case_id`: unique identifier
+- `category`: scenario type (ICU triage, meds, guideline, coding, etc.)
+- `risk_level`: low / medium / high
+- `question`: clinical decision-support question
+- `provided_context`: evidence snippet the model must use
+- `expected_behavior`: `answer` / `uncertain` / `refuse`
+- `required_citations`: anchors that must appear (pipe-separated)
+- `forbidden_actions`: unsafe actions to detect (pipe-separated)
+- `gold_key_points`: optional checklist (pipe-separated)
+- `notes`: optional
 
-2. Prompt Construction Layer
+Purpose: a small “golden” set that is stable, reviewable, and suitable for regression testing.
 
-Location: src/prompt_templates.py
+---
 
-Prompts enforce a structured response format.
+### 2) Prompt construction layer
 
-The model must produce sections including:
+Location: `src/prompt_templates.py`
 
-Recommendation
+Prompts enforce a strict response format so automated evaluation can parse reliably.
 
-Rationale with citations
+Required response sections:
 
-Uncertainty & Escalation
+- Recommendation
+- Rationale (bullets with citations)
+- Uncertainty & Escalation
+- Do-not-do
 
-Do-not-do actions
+Design intent:
 
-Structured responses make automated evaluation possible.
+- Reduce ambiguity in outputs
+- Make safety and uncertainty explicit
+- Make citations machine-checkable
 
-3. Generation Layer
+---
 
-Location: src/generate_answers.py
+### 3) Generation layer
 
-This component:
+Location: `src/generate_answers.py`
 
-Loads the evaluation dataset
+Responsibilities:
 
-Builds prompts using the template
+- Load the evaluation dataset
+- Construct prompts from `question` + `provided_context`
+- Call an LLM provider via an adapter interface
+- Write raw generations with metadata
+- Cache by prompt hash to avoid repeated API calls
 
-Sends prompts to the LLM
+Primary output: `results/raw_generations.jsonl`
 
-Stores model responses
+Why JSONL: supports multiple runs/models and is easy to diff and audit.
 
-Outputs are saved to:
+---
 
-results/raw_generations.jsonl
-
-Caching prevents repeated API calls when prompts have not changed.
-
-4. Evaluation Layer
+### 4) Evaluation layer
 
 Locations:
 
-src/metrics.py
+- `src/metrics.py`
+- `src/run_evaluation.py`
 
-src/run_evaluation.py
+This layer computes metric scores and applies safety flags.
 
-The evaluation layer analyzes model responses.
+Metric families (v1):
 
-Metrics include:
+- Format compliance  
+  Checks that required sections exist.
 
-Metric	Purpose
-format_compliance	checks required response structure
-citation_validity	detects fabricated citations
-required_citations	verifies expected references
-uncertainty_alignment	checks calibration of uncertainty
-faithfulness_proxy	estimates grounding in provided context
+- Citation validity  
+  Detects fabricated citation anchors and missing citations.
 
-Safety flags detect:
+- Required citation coverage  
+  Confirms required anchors appear for certain cases.
 
-unsafe recommendations
+- Uncertainty alignment  
+  Ensures the model refuses or hedges when expected, and avoids action language in refusal-required cases.
 
-contraindicated actions
+- Faithfulness proxy  
+  Conservative heuristic using citation presence + lexical overlap + penalties for action-heavy, low-overlap responses.
 
-fabricated citations
+Safety flags (deployment-gate style):
 
-refusal failures
+- Unsafe recommendation detected (forbidden action appears)
+- Bogus citation detected (citation anchors outside allowed range)
+- Refusal failure (expected refuse/uncertain but gives confident action)
 
-Evaluation results are written to:
+Primary output: `results/evaluation_output.csv`  
+Flagged subset: `results/flagged_cases.jsonl`
 
-results/evaluation_output.csv
+---
 
-5. Reporting Layer
+### 5) Reporting layer
 
-Location: src/summarize_results.py
+Location: `src/summarize_results.py`
 
-This component generates a human-readable evaluation report.
+Creates a human-readable report for quick review.
 
-Output:
+Primary output: `results/summary.md`
 
-results/summary.md
+Includes:
 
-The report includes:
+- PASS / WARN / FAIL distribution
+- Mean metric scores
+- Failure tag counts
+- Worst performing cases
 
-PASS / WARN / FAIL distribution
+---
 
-metric averages
+## Evaluation Philosophy
 
-failure mode counts
+This sandbox is designed around healthcare risk thinking, not just accuracy.
 
-worst performing cases
+Key principles:
 
-Evaluation Philosophy
+- Prefer safe refusals over confident invention
+- Require evidence-backed reasoning (citations)
+- Treat unsafe recommendations as hard failures
+- Surface failure patterns for human review
 
-Healthcare AI systems require stronger evaluation standards than typical AI tools.
+---
 
-This sandbox prioritizes:
+## Deployment Model (No Local Runtime)
 
-safe refusals
+The pipeline is intended to run via GitHub Actions.
 
-evidence-backed reasoning
+High-level workflow:
 
-uncertainty disclosure
+- Install dependencies
+- Generate answers (LLM calls)
+- Run evaluation
+- Generate summary report
+- Commit results back to the repo
 
-avoidance of unsafe recommendations
+This enables reproducible evaluation without local infrastructure.
 
-Rather than measuring only accuracy, the system emphasizes risk detection and safety signals.
+---
 
-Deployment Model
+## Limitations
 
-The evaluation pipeline is designed to run via GitHub Actions.
+This sandbox is not clinical validation.
 
-The workflow:
+Known limitations:
 
-installs dependencies
+- Faithfulness is a heuristic proxy (not full entailment verification)
+- Safety detection is pattern-based and incomplete by design
+- No clinician adjudication is included in v1
+- Context snippets are simplified and not exhaustive
 
-generates model outputs
+This project should be interpreted as an evaluation prototype and portfolio artifact, not a regulated system.
 
-runs evaluation metrics
+---
 
-produces reports
+## Future Improvements
 
-commits results to the repository
+High-ROI extensions:
 
-This approach enables reproducible evaluation without requiring local infrastructure.
+- Multi-model benchmarking
+- Add clinician adjudication rubric for flagged cases
+- Add retrieval stress-tests (context injection and irrelevant context)
+- Add a simple dashboard that reads `results/evaluation_output.csv`
+- Add regression gates (block merges if FAIL rate increases)
 
-Limitations
+---
 
-This sandbox uses heuristic evaluation metrics and does not provide full clinical validation.
+## Summary
 
-Limitations include:
+The Clinical AI Evaluation Sandbox demonstrates a realistic pre-deployment evaluation harness for healthcare LLM decision support.
 
-faithfulness is approximated using lexical overlap
+It shows:
 
-safety detection relies on rule-based patterns
-
-model correctness is not adjudicated by clinicians
-
-The system should therefore be viewed as an evaluation prototype, not a regulatory validation system.
-
-Future Improvements
-
-Potential extensions include:
-
-multi-model benchmarking
-
-LLM-as-judge scoring
-
-clinician adjudication workflows
-
-retrieval-based evaluation
-
-dashboard visualization of results
-
-Summary
-
-The Clinical AI Evaluation Sandbox demonstrates how an AI system could be evaluated before deployment into healthcare workflows.
-
-The project illustrates:
-
-evaluation dataset design
-
-structured prompting
-
-automated safety scoring
-
-reproducible evaluation pipelines
+- How to design a golden clinical evaluation dataset
+- How to enforce structured responses for scoring
+- How to implement safety flags and quality gates
+- How to run evaluation in CI and publish auditable artifacts
