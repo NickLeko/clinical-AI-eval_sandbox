@@ -112,7 +112,7 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
                     "model_id": row.get("model_id", ""),
                     "prompt_version": row.get("prompt_version", ""),
                     "overall_grade": record["overall_grade"],
-                    "failure_tags": record["failure_tags"],
+                    "failure_tags": "|".join(metric.failure_tags) if metric.failure_tags else "",
                     "question": row.get("question", ""),
                     "provided_context": row.get("provided_context", ""),
                     "answer_text": row.get("answer_text", ""),
