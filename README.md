@@ -112,37 +112,36 @@ These artifacts allow quick inspection of model behavior and safety risks.
 # Repository Structure
 
 clinical-ai-eval-sandbox/
-
-dataset/
-clinical_questions.csv
-
-src/
-init.py
-llm_clients.py
-prompt_templates.py
-generate_answers.py
-metrics.py
-run_evaluation.py
-summarize_results.py
-
-results/
-raw_generations.jsonl
-evaluation_output.csv
-flagged_cases.jsonl
-summary.md
-
-docs/
-architecture.md
-safety_case.md
-failure_modes.md
-
-.github/
-workflows/
-eval.yml
-
-requirements.txt
-README.md
-
+│
+├── dataset/
+│ └── clinical_questions.csv
+│
+├── src/
+│ ├── init.py
+│ ├── llm_clients.py
+│ ├── prompt_templates.py
+│ ├── generate_answers.py
+│ ├── metrics.py
+│ ├── run_evaluation.py
+│ └── summarize_results.py
+│
+├── results/
+│ ├── raw_generations.jsonl
+│ ├── evaluation_output.csv
+│ ├── flagged_cases.jsonl
+│ └── summary.md
+│
+├── docs/
+│ ├── architecture.md
+│ ├── safety_case.md
+│ └── failure_modes.md
+│
+├── .github/
+│ └── workflows/
+│ └── eval.yml
+│
+├── requirements.txt
+└── README.md
 ---
 
 # How the System Works
