@@ -2,6 +2,8 @@
 
 A lightweight evaluation framework that simulates how a healthcare company might **risk-test an LLM before deploying it into clinical decision-support workflows**.
 
+This project simulates how a healthcare AI team would evaluate LLMs for safety before integrating them into clinical decision-support workflows.
+
 This project demonstrates:
 
 - LLM evaluation design
