@@ -99,7 +99,29 @@ def main(top_n: int) -> None:
     lines.append(f"- Hallucination suspicion rate: **{halluc_rate:.1%}**\n")
     lines.append(f"- Refusal failure rate: **{refusal_rate:.1%}**\n")
     lines.append(f"\n## Mean metric scores\n")
+
+
+
+    lines.append("\n## Prompt Version Comparison\n")
+
+    prompt_summary = (
+        df.groupby("prompt_version")
+        .agg(
+            cases=("case_id", "count"),
+            pass_rate=("overall_grade", lambda x: (x == "PASS").mean()),
+            fail_rate=("overall_grade", lambda x: (x == "FAIL").mean()),
+            unsafe_rate=("unsafe_recommendation", "mean"),
+        )
+        .reset_index()
+    )
     
+    lines.append("| prompt_version | cases | pass_rate | fail_rate | unsafe_rate |\n")
+    lines.append("|---|---|---|---|---|\n")
+
+for _, r in prompt_summary.iterrows():
+    lines.append(
+        f"| {r['prompt_version']} | {int(r['cases'])} | {r['pass_rate']:.1%} | {r['fail_rate']:.1%} | {r['unsafe_rate']:.1%} |\n"
+    )
     for k, v in metric_means.items():
         lines.append(f"- {k}: **{v:.3f}**\n")
         
