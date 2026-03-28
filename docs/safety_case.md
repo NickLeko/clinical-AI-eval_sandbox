@@ -4,12 +4,11 @@
 
 This document outlines the safety reasoning behind the Clinical AI Evaluation Sandbox.
 
-The goal is to demonstrate how a healthcare organization might evaluate and risk-assess a Large Language Model (LLM) before integrating it into clinical decision-support workflows.
+The goal is to demonstrate how a healthcare organization might evaluate and risk-assess a Large Language Model before integrating it into clinical decision-support workflows.
 
-This project is not a clinical device.  
-It is an **evaluation prototype designed to surface potential safety risks.**
+This project is not a clinical device. It is an evaluation prototype designed to surface potential safety risks.
 
----
+Read this file if you want the safety framing: intended use, system boundary, hazards, mitigations, and non-claims.
 
 ## Intended Use
 
@@ -22,9 +21,19 @@ The system is intended to:
 - evaluate citation grounding
 - evaluate uncertainty calibration
 
-The system does **not provide medical advice** and is not used for patient care.
+The system does not provide medical advice and is not used for patient care.
 
----
+## Non-Claims
+
+This safety case does not claim:
+
+- regulatory compliance
+- clinical validation
+- clinician adjudication
+- production deployment readiness
+- comprehensive hazard coverage
+
+It is a simplified safety framing document for an evaluation artifact.
 
 ## System Boundary
 
@@ -43,25 +52,21 @@ The system does not include:
 - clinician user interface
 - production deployment infrastructure
 
----
-
 ## Hazard Identification
 
 Potential hazards when deploying LLMs in healthcare include:
 
-### H1 — Hallucinated Clinical Facts
+### H1. Hallucinated Clinical Facts
 
 The model invents medical facts not supported by evidence.
 
-Example:
+Examples:
 
 - inventing a contraindication
 - inventing a medication interaction
 - inventing guideline recommendations
 
----
-
-### H2 — Unsafe Treatment Recommendations
+### H2. Unsafe Treatment Recommendations
 
 The model recommends actions that may harm a patient.
 
@@ -71,35 +76,29 @@ Examples:
 - suggesting unsafe dosing
 - ignoring critical symptoms
 
----
-
-### H3 — Overconfident Responses
+### H3. Overconfident Responses
 
 The model expresses certainty despite incomplete information.
 
-Example:
+Examples:
 
 - diagnosing without adequate context
 - failing to acknowledge uncertainty
 
----
-
-### H4 — Failure to Refuse
+### H4. Failure to Refuse
 
 The model provides an answer when the correct behavior should be refusal.
 
-Example:
+Examples:
 
 - answering questions without sufficient evidence
 - giving treatment advice outside provided context
 
----
-
-## Risk Mitigations
+## Risk Mitigations In The Sandbox
 
 The sandbox implements several mitigations to detect these hazards.
 
-### Structured Prompting
+### Structured prompting
 
 Prompts enforce structured responses including:
 
@@ -110,21 +109,13 @@ Prompts enforce structured responses including:
 
 This structure improves interpretability and evaluation reliability.
 
----
+### Citation requirements
 
-### Citation Requirements
-
-Models are required to reference context anchors such as:
-
-CTX1  
-CTX2  
-CTX3
+Models are required to reference context anchors such as `CTX1`, `CTX2`, and `CTX3`.
 
 Evaluation detects fabricated citations.
 
----
-
-### Forbidden Action Detection
+### Forbidden action detection
 
 Dataset cases may include forbidden actions.
 
@@ -135,9 +126,7 @@ Examples:
 
 Evaluation flags responses containing unsafe actions.
 
----
-
-### Uncertainty Evaluation
+### Uncertainty evaluation
 
 The system evaluates whether the model appropriately:
 
@@ -145,9 +134,7 @@ The system evaluates whether the model appropriately:
 - refuses when context is insufficient
 - avoids confident language
 
----
-
-### Automated Safety Flags
+### Automated safety flags
 
 The evaluation layer applies safety flags including:
 
@@ -158,9 +145,7 @@ The evaluation layer applies safety flags including:
 
 Safety flags cause a case to fail evaluation.
 
----
-
-## Human-in-the-Loop Review
+## Human-In-The-Loop Review
 
 In real clinical AI systems, automated evaluation must be supplemented with human review.
 
@@ -171,11 +156,9 @@ Typical workflow:
 3. failure patterns are categorized
 4. prompts or guardrails are updated
 
-The sandbox simulates this by generating **flagged case reports.**
+The sandbox simulates this by generating flagged case reports.
 
----
-
-## Monitoring Concept (Production Systems)
+## Production Monitoring Concept
 
 If deployed in a production environment, additional monitoring would be required:
 
@@ -184,9 +167,7 @@ If deployed in a production environment, additional monitoring would be required
 - unsafe output detection
 - clinician feedback loops
 
-These mechanisms are outside the scope of this sandbox but are documented for completeness.
-
----
+These mechanisms are outside the scope of this sandbox and are documented for completeness only.
 
 ## Residual Risk
 
@@ -198,11 +179,9 @@ Remaining risks include:
 - context misinterpretation
 - incomplete medical knowledge
 
-Therefore, LLM systems should operate under **clinician supervision**.
+Therefore, LLM systems should operate under clinician supervision.
 
----
-
-## Limitations of This Safety Case
+## Limitations Of This Safety Case
 
 This document represents a simplified safety analysis.
 
@@ -213,19 +192,12 @@ Limitations include:
 - heuristic evaluation metrics
 - limited dataset size
 
-The document is intended to demonstrate **risk-aware system thinking**, not regulatory compliance.
+The document is intended to demonstrate risk-aware system thinking, not regulatory compliance.
 
----
+## Related Docs
 
-## Summary
-
-The Clinical AI Evaluation Sandbox demonstrates how healthcare AI systems can be evaluated with safety in mind.
-
-Key principles include:
-
-- structured prompting
-- automated safety detection
-- explicit uncertainty handling
-- human review of flagged outputs
-
-These practices help reduce the risk of unsafe AI behavior before deployment.
+- `README.md` for project scope and artifact overview
+- `docs/architecture.md` for system structure and pipeline flow
+- `docs/results_interpretation.md` for benchmark-reading guardrails
+- `docs/failure_modes.md` for failure taxonomy and the documented v1 limitation
+- `docs/maintenance_boundaries.md` for protected benchmark areas
