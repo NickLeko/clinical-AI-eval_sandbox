@@ -6,6 +6,15 @@ This repository is meant to signal evaluation judgment, safety-first thinking, a
 
 Read this file if you want the fastest overview of what the project is, what it evaluates, what artifacts it produces, and what it does not claim.
 
+The checked-in public artifacts represent one explicit published run:
+
+- provider: `openai`
+- model: `gpt-4o`
+- run_id: `20260305_045410`
+- cases scored: `25`
+
+Historical raw generations used for cache/reproducibility are stored separately under `results/cache/` and are not the published benchmark result set.
+
 ## What This Project Is
 
 This project simulates a pre-deployment healthcare AI evaluation workflow:
@@ -66,10 +75,13 @@ clinical-AI-eval_sandbox/
 │   ├── run_evaluation.py           # Applies metrics to generations
 │   └── summarize_results.py        # Builds markdown summary
 ├── results/
-│   ├── raw_generations.jsonl       # Raw prompts, answers, metadata
+│   ├── raw_generations.jsonl       # One explicit published provider/model/run
+│   ├── run_manifest.json           # Published run identity and provenance
 │   ├── evaluation_output.csv       # Scored case-level results
 │   ├── flagged_cases.jsonl         # WARN/FAIL subset for review
-│   └── summary.md                  # Human-readable run summary
+│   ├── summary.md                  # Human-readable run summary
+│   └── cache/
+│       └── raw_generations_cache.jsonl   # Reusable raw-generation cache/history store
 ├── docs/
 │   ├── architecture.md             # System overview
 │   ├── safety_case.md              # Safety framing and hazards
@@ -95,7 +107,7 @@ For a first pass, a reviewer can understand the project in this order:
 dataset/clinical_questions.csv
 -> src/prompt_templates.py
 -> src/generate_answers.py
--> results/raw_generations.jsonl
+-> results/raw_generations.jsonl + results/run_manifest.json
 -> src/run_evaluation.py + src/metrics.py
 -> results/evaluation_output.csv + results/flagged_cases.jsonl
 -> src/summarize_results.py
@@ -106,43 +118,47 @@ dataset/clinical_questions.csv
 
 The main review artifacts are:
 
-- `results/raw_generations.jsonl`: raw prompts, answers, and run metadata
+- `results/raw_generations.jsonl`: raw prompts, answers, and metadata for the one published run
+- `results/run_manifest.json`: the explicit provider / model / run_id backing the public artifacts
 - `results/evaluation_output.csv`: case-level metrics, flags, and PASS/WARN/FAIL grades
 - `results/flagged_cases.jsonl`: subset for manual inspection of concerning outputs
 - `results/summary.md`: compact benchmark report with rates, means, and worst cases
+- `results/cache/raw_generations_cache.jsonl`: reusable raw-generation cache/history store that is not itself the public benchmark set
 
-## Reported Benchmark Snapshot
+## Current Published Run
 
-The repository includes benchmark results for 4 models on the same 25-case dataset, yielding 100 evaluated outputs total.
+The checked-in benchmark artifacts currently publish one explicit run:
 
-| Model | Cases Evaluated | PASS | WARN | FAIL | Unsafe Recommendation Rate | Hallucination Rate | Refusal Failure Rate |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| GPT-4o | 25 | 22 | 0 | 3 | 12% | 12% | 0% |
-| GPT-4.1-mini | 25 | 22 | 1 | 2 | 8% | 8% | 4% |
-| GPT-3.5-turbo | 25 | 23 | 0 | 2 | 8% | 8% | 0% |
-| GPT-4.1-nano | 25 | 23 | 0 | 2 | 8% | 8% | 0% |
+- provider: `openai`
+- model: `gpt-4o`
+- run_id: `20260305_045410`
+- dataset rows scored: `25`
 
-Key takeaway: stronger general capability did not eliminate unsafe or ungrounded clinical behavior. This is exactly why healthcare-oriented evaluation and failure review matter.
+Use `results/run_manifest.json` and `results/summary.md` together when reviewing the public benchmark set.
+
+Important guardrail: a fully passing run on this heuristic benchmark is not evidence of clinical safety or deployment readiness.
 
 ## Running The Project
 
-This repo is set up to run through GitHub Actions rather than requiring local infrastructure.
+This repo separates offline verification from manual benchmark refreshes.
 
-### GitHub Actions flow
+### Offline verification
 
-1. Add an `OPENAI_API_KEY` repository secret.
-2. Open the Actions workflow for the clinical evaluation run.
-3. Provide workflow inputs such as provider, model, max cases, and prompt version.
-4. Let the workflow generate answers, score them, summarize results, and write artifacts into `results/`.
+The `Offline Verification` workflow compiles the repo, runs the unit tests, regenerates the published run from `results/cache/raw_generations_cache.jsonl`, and checks that the public artifacts reproduce exactly.
+
+### Manual benchmark refresh
+
+The `Clinical AI Eval (Manual Benchmark Refresh)` workflow is the API-backed path for refreshing the published run.
 
 Expected workflow inputs:
 
 | Input | Example | Description |
 |---|---|---|
 | `provider` | `openai` | LLM provider |
-| `model` | `gpt-4.1-mini` | Model used for generation |
+| `model` | `gpt-4o` | Model used for generation |
 | `max_cases` | `25` | Maximum dataset rows to run |
 | `prompt_version` | `v1` | Prompt label tracked in artifacts |
+| `run_id` | `20260330_refresh` | Explicit published run identifier |
 
 ### Local script entry points
 
@@ -151,8 +167,6 @@ If a reviewer wants to inspect the mechanics, the main scripts are:
 - `src/generate_answers.py`
 - `src/run_evaluation.py`
 - `src/summarize_results.py`
-
-This maintenance pass does not change how those scripts behave.
 
 ## Documentation Guide
 
@@ -174,6 +188,7 @@ The following files are benchmark-sensitive and should be treated as protected u
 - `src/metrics.py`
 - `src/run_evaluation.py`
 - `src/generate_answers.py`
+- `results/run_manifest.json`
 - `results/summary.md`
 - `results/evaluation_output.csv`
 - `results/flagged_cases.jsonl`
@@ -185,9 +200,9 @@ See `docs/maintenance_boundaries.md` for the maintenance policy used in this rep
 
 - The dataset is intentionally small and reviewable.
 - Safety flags are heuristic and incomplete.
-- Reported results are versioned artifacts, not universal model judgments.
+- Reported results are one explicit published provider / model / run, not universal model judgments.
 - Human clinical review is outside the automated pipeline.
-- A documented v1 unsafe-action limitation is intentionally preserved for benchmark reproducibility rather than silently corrected.
+- Historical cached raw generations are kept separate from the published benchmark result set.
 
 ## Why This Repo Works As A Portfolio Artifact
 

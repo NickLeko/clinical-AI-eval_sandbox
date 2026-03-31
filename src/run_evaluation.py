@@ -1,24 +1,25 @@
 import argparse
 import json
-import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
 
+if __package__ in (None, ""):
+    import sys
+
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.artifact_paths import build_artifact_paths
 from src.metrics import evaluate_case, normalize_pipe_list
 
-RESULTS_DIR = "results"
-RAW_IN_PATH = os.path.join(RESULTS_DIR, "raw_generations.jsonl")
-EVAL_OUT_PATH = os.path.join(RESULTS_DIR, "evaluation_output.csv")
-FLAGGED_OUT_PATH = os.path.join(RESULTS_DIR, "flagged_cases.jsonl")
 
-
-def read_jsonl(path: str) -> List[Dict[str, Any]]:
-    if not os.path.exists(path):
+def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
 
     rows: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -27,14 +28,52 @@ def read_jsonl(path: str) -> List[Dict[str, Any]]:
     return rows
 
 
-def write_jsonl(path: str, rows: List[Dict[str, Any]]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
+    with path.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-def main(dataset_path: str, max_ctx_anchors: int) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+def load_run_manifest(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing run manifest: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_public_run(rows: List[Dict[str, Any]], manifest: Dict[str, Any]) -> None:
+    if not rows:
+        raise ValueError("No public raw generations found. Run generate_answers.py first.")
+
+    expected_run_id = str(manifest["run_id"])
+    expected_provider = str(manifest["provider"])
+    expected_model_id = str(manifest["model_id"])
+
+    seen_case_ids = set()
+    for row in rows:
+        if str(row.get("run_id", "")) != expected_run_id:
+            raise ValueError(f"Unexpected run_id in public raw generations: {row.get('run_id')}")
+        if str(row.get("provider", "")) != expected_provider:
+            raise ValueError(f"Unexpected provider in public raw generations: {row.get('provider')}")
+        if str(row.get("model_id", "")) != expected_model_id:
+            raise ValueError(f"Unexpected model_id in public raw generations: {row.get('model_id')}")
+
+        case_id = str(row.get("case_id", ""))
+        if not case_id:
+            raise ValueError("Public raw generations are missing case_id values")
+        if case_id in seen_case_ids:
+            raise ValueError(f"Duplicate case_id in public raw generations: {case_id}")
+        seen_case_ids.add(case_id)
+
+    expected_case_count = int(manifest.get("case_count", len(rows)))
+    if len(rows) != expected_case_count:
+        raise ValueError(
+            f"Public raw generations count mismatch: expected {expected_case_count}, found {len(rows)}"
+        )
+
+
+def main(dataset_path: str, results_dir: str) -> None:
+    paths = build_artifact_paths(results_dir)
+    paths.results_dir.mkdir(parents=True, exist_ok=True)
 
     # Load dataset
     df_cases = pd.read_csv(dataset_path)
@@ -44,10 +83,11 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
             raise ValueError(f"Dataset missing required column: {c}")
 
     # Load generations
-    gen_rows = read_jsonl(RAW_IN_PATH)
+    manifest = load_run_manifest(paths.run_manifest_path)
+    gen_rows = read_jsonl(paths.public_raw_path)
+    validate_public_run(gen_rows, manifest)
+
     df_gen = pd.DataFrame(gen_rows)
-    if df_gen.empty:
-        raise ValueError("No generations found. Run generate_answers.py first.")
 
     # Ensure expected generation columns exist
     for c in ["case_id", "answer_text"]:
@@ -76,7 +116,6 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
             expected_behavior=expected_behavior,
             required_citations=required_cits,
             forbidden_actions=forbidden_actions,
-            max_ctx_anchors=max_ctx_anchors,
         )
 
         record: Dict[str, Any] = {
@@ -86,6 +125,8 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
             "provider": row.get("provider", ""),
             "model_id": row.get("model_id", ""),
             "prompt_version": row.get("prompt_version", ""),
+            "source_run_id": row.get("source_run_id", ""),
+            "generation_mode": row.get("generation_mode", ""),
             "category": row.get("category", ""),
             "risk_level": row.get("risk_level", ""),
             "expected_behavior": expected_behavior,
@@ -120,24 +161,19 @@ def main(dataset_path: str, max_ctx_anchors: int) -> None:
             )
 
     df_out = pd.DataFrame(out_rows)
-    df_out.to_csv(EVAL_OUT_PATH, index=False)
+    df_out.to_csv(paths.evaluation_output_path, index=False)
 
-    write_jsonl(FLAGGED_OUT_PATH, flagged_rows)
+    write_jsonl(paths.flagged_output_path, flagged_rows)
 
-    print(f"Wrote: {EVAL_OUT_PATH}")
-    print(f"Wrote: {FLAGGED_OUT_PATH}")
-    print("Results dir contents:", os.listdir(RESULTS_DIR))
+    print(f"Wrote: {paths.evaluation_output_path}")
+    print(f"Wrote: {paths.flagged_output_path}")
+    print("Results dir contents:", sorted(p.name for p in paths.results_dir.iterdir()))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run evaluation metrics over generated answers.")
     parser.add_argument("--dataset", default="dataset/clinical_questions.csv", help="Path to dataset CSV.")
-    parser.add_argument(
-        "--max-ctx-anchors",
-        type=int,
-        default=8,
-        help="Highest allowed CTX anchor number (e.g., 8 allows [CTX1]..[CTX8]).",
-    )
+    parser.add_argument("--results-dir", default="results", help="Directory containing published artifacts.")
     args = parser.parse_args()
 
-    main(dataset_path=args.dataset, max_ctx_anchors=args.max_ctx_anchors)
+    main(dataset_path=args.dataset, results_dir=args.results_dir)

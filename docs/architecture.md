@@ -38,11 +38,14 @@ The system is intentionally lightweight and organized around a simple automated 
 dataset/clinical_questions.csv
 -> src/prompt_templates.py
 -> src/generate_answers.py
--> results/raw_generations.jsonl
+-> results/raw_generations.jsonl + results/run_manifest.json
 -> src/run_evaluation.py + src/metrics.py
 -> results/evaluation_output.csv + results/flagged_cases.jsonl
 -> src/summarize_results.py
 -> results/summary.md
+
+Reusable raw-generation cache is stored separately at:
+results/cache/raw_generations_cache.jsonl
 ```
 
 ## Module Breakdown
@@ -96,12 +99,15 @@ Responsibilities:
 - load the evaluation dataset
 - construct prompts from `question` and `provided_context`
 - call an LLM provider through an adapter interface
-- write raw generations with metadata
-- cache by prompt hash to avoid repeated API calls
+- write one explicit published run with metadata
+- maintain a separate reusable cache store for raw generations
 
-Primary output: `results/raw_generations.jsonl`
+Primary public outputs:
 
-Why JSONL: it supports multiple runs and models and is straightforward to diff and audit.
+- `results/raw_generations.jsonl`
+- `results/run_manifest.json`
+
+Reusable cache store: `results/cache/raw_generations_cache.jsonl`
 
 ### 4. Evaluation layer
 
@@ -115,16 +121,15 @@ This layer computes metric scores and applies safety flags.
 Metric families in v1:
 
 - Format compliance: checks that required sections exist
-- Citation validity: detects fabricated citation anchors and missing citations
+- Citation validity: checks that cited anchors actually exist in the case context
 - Required citation coverage: confirms required anchors appear for certain cases
-- Uncertainty alignment: ensures the model refuses or hedges when expected and avoids action language in refusal-required cases
-- Faithfulness proxy: conservative heuristic using citation presence, lexical overlap, and penalties for action-heavy low-overlap responses
+- Uncertainty alignment: checks that refuse/uncertain cases use explicit limitation language and that answer cases do not slip into insufficiency-style refusal wording
+- Faithfulness proxy: conservative heuristic using citation presence, lexical overlap, and a narrow sparse-context warning path for unsupported disease-specific elaboration
 
-Safety flags:
+Current issue tags:
 
-- unsafe recommendation detected
-- bogus citation detected
-- refusal failure
+- Hard-failure tags: `UNSAFE_RECOMMENDATION`, `UNSUPPORTED_CITATION`, `REFUSAL_FAILURE`
+- Warning tags: `HALLUCINATED_FACT`, `UNSUPPORTED_SPECIFICITY`, `UNCERTAINTY_MISALIGNED`, `LOW_FAITHFULNESS`, `MISSING_REQUIRED_CITATIONS`, `FORMAT_NONCOMPLIANT`
 
 Primary output: `results/evaluation_output.csv`
 
@@ -182,6 +187,8 @@ High-level workflow:
 - commit results back to the repo
 
 This enables reproducible evaluation without local infrastructure.
+
+The repo also includes a separate offline verification workflow that regenerates the checked-in published run from the cache store and checks the artifacts for exact reproducibility.
 
 ## Limitations
 

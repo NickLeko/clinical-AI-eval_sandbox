@@ -1,13 +1,16 @@
 import argparse
+import json
 import os
-from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
+if __package__ in (None, ""):
+    import sys
 
-RESULTS_DIR = "results"
-EVAL_IN_PATH = os.path.join(RESULTS_DIR, "evaluation_output.csv")
-SUMMARY_OUT_PATH = os.path.join(RESULTS_DIR, "summary.md")
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.artifact_paths import build_artifact_paths
 
 
 def pct(x: float) -> str:
@@ -20,15 +23,25 @@ def safe_mean(series: pd.Series) -> float:
     return float(series.mean())
 
 
-def main(top_n: int) -> None:
-    if not os.path.exists(EVAL_IN_PATH):
-        raise FileNotFoundError(f"Missing file: {EVAL_IN_PATH}")
+def load_run_manifest(path: Path) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing run manifest: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    df = pd.read_csv(EVAL_IN_PATH)
+
+def main(top_n: int, results_dir: str) -> None:
+    paths = build_artifact_paths(results_dir)
+    if not paths.evaluation_output_path.exists():
+        raise FileNotFoundError(f"Missing file: {paths.evaluation_output_path}")
+
+    df = pd.read_csv(paths.evaluation_output_path)
+    manifest = load_run_manifest(paths.run_manifest_path)
 
     for col in ["unsafe_recommendation", "hallucination_suspected", "refusal_failure"]:
         if col not in df.columns:
             df[col] = False
+    if "failure_tags" in df.columns:
+        df["failure_tags"] = df["failure_tags"].fillna("").astype(str)
 
     # Safety signal subsets
     unsafe_cases = df[df["unsafe_recommendation"] == True]
@@ -78,72 +91,48 @@ def main(top_n: int) -> None:
     # Worst cases by grade then by faithfulness
     grade_rank = {"FAIL": 0, "WARN": 1, "PASS": 2}
     df["_grade_rank"] = df["overall_grade"].map(grade_rank).fillna(9)
-    df_sorted = df.sort_values(by=["_grade_rank", "faithfulness_proxy"], ascending=[True, True])
+    df_sorted = df.sort_values(
+        by=["_grade_rank", "faithfulness_proxy", "case_id"],
+        ascending=[True, True, True],
+    )
 
     worst = df_sorted.head(top_n)[
         ["case_id", "category", "risk_level", "model_id", "prompt_version", "overall_grade", "faithfulness_proxy", "uncertainty_alignment", "failure_tags"]
     ]
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-
     lines = []
     lines.append(f"# Clinical AI Evaluation Sandbox — Summary\n")
-    lines.append(f"_Generated: {now}_\n")
+    lines.append(f"_Published run: `{manifest['provider']}` / `{manifest['model_id']}` / `{manifest['run_id']}`_\n")
+    lines.append("\n## Run Identity\n")
+    lines.append(f"- Provider: **{manifest['provider']}**\n")
+    lines.append(f"- Model: **{manifest['model_id']}**\n")
+    lines.append(f"- Run ID: **{manifest['run_id']}**\n")
+    lines.append(f"- Prompt version: **{manifest['prompt_version']}**\n")
+    lines.append(f"- Cases in published run: **{manifest['case_count']}**\n")
+    if manifest.get("source_run_ids"):
+        lines.append(f"- Source generation run ids: **{', '.join(manifest['source_run_ids'])}**\n")
+
     lines.append(f"## Scorecard\n")
     lines.append(f"- Total cases scored: **{total}**\n")
     lines.append(f"- PASS: **{grade_counts.get('PASS', 0)}** ({pct(pass_rate)})\n")
     lines.append(f"- WARN: **{grade_counts.get('WARN', 0)}** ({pct(warn_rate)})\n")
     lines.append(f"- FAIL: **{grade_counts.get('FAIL', 0)}** ({pct(fail_rate)})\n")
-    lines.append("\n## Safety Signals\n")
+    lines.append("\n## Interpretation Guardrail\n")
+    lines.append("- This published run is a heuristic benchmark artifact, not evidence of clinical safety or deployment readiness.\n")
+    lines.append("- Historical cached generations are stored separately under `results/cache/` and are not the published benchmark set.\n")
+    lines.append("\n## Heuristic Signal Rates\n")
     lines.append(f"- Unsafe recommendation rate: **{unsafe_rate:.1%}**\n")
     lines.append(f"- Hallucination suspicion rate: **{halluc_rate:.1%}**\n")
     lines.append(f"- Refusal failure rate: **{refusal_rate:.1%}**\n")
     lines.append(f"\n## Mean metric scores\n")
-
-
-
-    lines.append("\n## Prompt Version Comparison\n")
-
-    prompt_summary = (
-        df.groupby("prompt_version")
-        .agg(
-            cases=("case_id", "count"),
-            pass_rate=("overall_grade", lambda x: (x == "PASS").mean()),
-            fail_rate=("overall_grade", lambda x: (x == "FAIL").mean()),
-            unsafe_rate=("unsafe_recommendation", "mean"),
-        )
-        .reset_index()
-    )
-
-
-    if len(prompt_summary) > 1:
-    lines.append("\n## Safety Regression Check\n")
-
-    baseline = prompt_summary.iloc[0]
-    for _, r in prompt_summary.iloc[1:].iterrows():
-        if r["unsafe_rate"] > baseline["unsafe_rate"]:
-            lines.append(
-                f"- ⚠️ Prompt `{r['prompt_version']}` increased unsafe recommendation rate "
-                f"({r['unsafe_rate']:.1%} vs baseline {baseline['unsafe_rate']:.1%})\n"
-            )
-
-
-    
-    lines.append("| prompt_version | cases | pass_rate | fail_rate | unsafe_rate |\n")
-    lines.append("|---|---|---|---|---|\n")
-
-for _, r in prompt_summary.iterrows():
-    lines.append(
-        f"| {r['prompt_version']} | {int(r['cases'])} | {r['pass_rate']:.1%} | {r['fail_rate']:.1%} | {r['unsafe_rate']:.1%} |\n"
-    )
     for k, v in metric_means.items():
         lines.append(f"- {k}: **{v:.3f}**\n")
-        
+
     lines.append(f"\n## Failure tag counts\n")
     if not tag_counts:
         lines.append("- (none)\n")
     else:
-        for tag, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True):
+        for tag, count in sorted(tag_counts.items(), key=lambda x: (-x[1], x[0])):
             lines.append(f"- {tag}: **{count}**\n")
 
     lines.append(f"\n## Worst cases (top {top_n})\n")
@@ -156,19 +145,17 @@ for _, r in prompt_summary.iterrows():
             f"{float(r.get('uncertainty_alignment',0.0)):.3f} | {r.get('failure_tags','')} |\n"
         )
 
-
-    
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    with open(SUMMARY_OUT_PATH, "w", encoding="utf-8") as f:
+    os.makedirs(results_dir, exist_ok=True)
+    with paths.summary_output_path.open("w", encoding="utf-8") as f:
         f.write("".join(lines))
 
-    print(f"Wrote: {SUMMARY_OUT_PATH}")
+    print(f"Wrote: {paths.summary_output_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Summarize evaluation results into Markdown.")
     parser.add_argument("--top-n", type=int, default=10, help="Number of worst cases to list.")
+    parser.add_argument("--results-dir", default="results", help="Directory containing published artifacts.")
     args = parser.parse_args()
 
-    main(top_n=args.top_n)
-
+    main(top_n=args.top_n, results_dir=args.results_dir)

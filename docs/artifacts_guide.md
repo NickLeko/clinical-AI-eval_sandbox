@@ -9,9 +9,11 @@ Read this file if you want a file-by-file guide to the outputs under `results/`.
 The main benchmark artifacts are:
 
 - `results/raw_generations.jsonl`
+- `results/run_manifest.json`
 - `results/evaluation_output.csv`
 - `results/flagged_cases.jsonl`
 - `results/summary.md`
+- `results/cache/raw_generations_cache.jsonl`
 
 These files serve different review purposes. They should be read together rather than as substitutes for one another.
 
@@ -21,7 +23,7 @@ What it contains:
 
 - prompt text
 - model answer text
-- run metadata such as provider, model, prompt version, and timestamp
+- one explicit published run's metadata such as provider, model, prompt version, and run_id
 - raw provider response payload for debugging
 
 Why it matters:
@@ -34,6 +36,25 @@ What it does not mean:
 
 - it is not the scored benchmark by itself
 - it does not tell you whether an output passed or failed without the evaluation layer
+- it is not the raw generation history for every exploratory run in the repo
+
+## `results/run_manifest.json`
+
+What it contains:
+
+- the explicit `provider`, `model_id`, and `run_id` for the published artifact set
+- dataset hash and case count
+- provenance about whether the published raw file was regenerated from cache or fresh model calls
+
+Why it matters:
+
+- makes the public benchmark set explicit and reproducible
+- prevents accidental mixing of cached history with the published run
+
+What it does not mean:
+
+- it is not a scored artifact by itself
+- it does not replace the raw, evaluated, and summarized outputs
 
 ## `results/evaluation_output.csv`
 
@@ -94,17 +115,36 @@ What it does not mean:
 - it is a summary view, not the full evidence base
 - it should be cross-checked with `evaluation_output.csv` and flagged examples when making interpretations
 
+## `results/cache/raw_generations_cache.jsonl`
+
+What it contains:
+
+- reusable raw generations from prior runs
+- response payloads used for cache hits and offline reproduction
+
+Why it matters:
+
+- keeps cache/history separate from the published benchmark set
+- allows the public artifacts to be regenerated offline without re-calling the API when the exact run is already cached
+
+What it does not mean:
+
+- it is not the public benchmark result set
+- rows in this file should not be treated as directly comparable published outputs unless they are selected into `results/raw_generations.jsonl`
+
 ## Suggested Review Order
 
-1. Start with `results/summary.md` for the high-level snapshot.
-2. Open `results/flagged_cases.jsonl` for representative concerning cases.
-3. Use `results/evaluation_output.csv` for structured detail and comparison.
-4. Inspect `results/raw_generations.jsonl` when you want full prompt-and-answer auditability.
+1. Start with `results/run_manifest.json` to confirm the exact published provider / model / run.
+2. Read `results/summary.md` for the high-level snapshot.
+3. Open `results/flagged_cases.jsonl` for representative concerning cases.
+4. Use `results/evaluation_output.csv` for structured detail.
+5. Inspect `results/raw_generations.jsonl` when you want full prompt-and-answer auditability for the published run.
 
 ## Interpretation Guardrails
 
 - Treat these artifacts as benchmark-specific outputs, not universal model judgments.
 - Treat heuristic flags as signals for review, not as definitive clinical conclusions.
+- Treat `results/cache/raw_generations_cache.jsonl` as cache/history, not as the published benchmark set.
 - Read the artifacts alongside `docs/results_interpretation.md` and `docs/maintenance_boundaries.md`.
 
 ## Related Docs

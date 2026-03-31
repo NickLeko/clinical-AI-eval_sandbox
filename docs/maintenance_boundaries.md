@@ -100,9 +100,9 @@ If one of these changes is needed, it should be called out explicitly in the PR 
 
 If results are regenerated without changing benchmark logic, that should still be called out explicitly as a result refresh.
 
-## Maintenance Rule Used In This Pass
+## Docs-Only Rule
 
-This maintenance pass is documentation-only. It does not modify:
+If a change is described as documentation-only, it should not modify:
 
 - dataset content
 - prompt template behavior
@@ -111,4 +111,4 @@ This maintenance pass is documentation-only. It does not modify:
 - benchmark artifacts
 - reported results
 
-That boundary is intentional to preserve reproducibility and reviewer trust.
+If any of those change, the update should be labeled as an evaluation revision or a result refresh instead.

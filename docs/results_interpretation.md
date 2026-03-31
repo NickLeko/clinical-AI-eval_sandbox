@@ -6,7 +6,7 @@ Read this file if you want guardrails for understanding PASS / WARN / FAIL, safe
 
 ## What The Results Represent
 
-The reported results represent behavior on this repository's fixed evaluation dataset, prompt structure, scoring heuristics, and artifact pipeline.
+The reported results represent behavior on one explicit published provider / model / run under this repository's fixed evaluation dataset, prompt structure, scoring heuristics, and artifact pipeline.
 
 They are best understood as:
 
@@ -53,21 +53,21 @@ That means the comparisons are useful for internal benchmark interpretation, but
 
 ## Important Limitation For v1
 
-The repository documents a known v1 limitation in unsafe action detection: negated mentions of a forbidden action may still be flagged.
+The current evaluator includes a negation-aware check for forbidden actions and direct clinical action language, which removes the earlier false-positive pattern where answers like `"do not prescribe amoxicillin"` could be flagged as unsafe recommendations.
 
 This matters because:
 
-- unsafe recommendation rates may be somewhat inflated
-- more verbose models may be penalized differently
-- benchmark comparisons should be read with that limitation in mind
+- the current published unsafe and hallucination rates should not inherit that earlier false-positive pattern
+- historical cached raw generations under `results/cache/` may still reflect exploratory runs produced before the public artifact set was cleaned up
+- the evaluator is still heuristic and should not be mistaken for clinician adjudication
 
-That limitation is intentionally documented rather than silently corrected in v1 so the reported results remain reproducible.
+Even with that fix, the benchmark remains a screening artifact rather than a clinical validation method.
 
 ## Responsible Takeaways
 
 Reasonable takeaways include:
 
-- even capable models can fail in clinically meaningful ways
+- even capable models can still trigger safety-relevant warnings or failures
 - safety-oriented evaluation is necessary before healthcare deployment
 - benchmark artifacts should be reviewable and auditable
 - limitations should be documented honestly

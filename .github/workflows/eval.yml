@@ -1,4 +1,4 @@
-name: Clinical AI Eval (CI)
+name: Clinical AI Eval (Manual Benchmark Refresh)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       model:
         description: "Model id (provider-specific)"
         required: true
-        default: "gpt-4.1-mini"
+        default: "gpt-4o"
       max_cases:
         description: "Max cases to run (cost control)"
         required: true
@@ -19,35 +19,21 @@ on:
         description: "Prompt version label"
         required: true
         default: "v1"
-  push:
-    branches: ["main"]
-    paths:
-      - "dataset/**"
-      - "src/**"
-      - "docs/**"
-      - "requirements.txt"
-      - ".github/workflows/eval.yml"
+      run_id:
+        description: "Explicit benchmark run identifier"
+        required: true
+        default: "manual_refresh"
 
 permissions:
   contents: write
 
 jobs:
   run-eval:
-    # Prevent infinite loops when the workflow commits results back to the repo
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
 
     env:
-      # Reads from GitHub Secrets in real runs
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-      # Defaults for push-triggered runs
-      PROVIDER: "openai"
-      MODEL_ID: "gpt-4.1-mini"
-      MAX_CASES: "25"
-      PROMPT_VERSION: "v1"
-
-      # Ensure `from src...` imports work when running scripts
       PYTHONPATH: "."
 
     steps:
@@ -65,65 +51,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set inputs (workflow_dispatch)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Generate published run
         run: |
-          echo "PROVIDER=${{ inputs.provider }}" >> $GITHUB_ENV
-          echo "MODEL_ID=${{ inputs.model }}" >> $GITHUB_ENV
-          echo "MAX_CASES=${{ inputs.max_cases }}" >> $GITHUB_ENV
-          echo "PROMPT_VERSION=${{ inputs.prompt_version }}" >> $GITHUB_ENV
+          python src/generate_answers.py \
+            --dataset dataset/clinical_questions.csv \
+            --provider "${{ inputs.provider }}" \
+            --model "${{ inputs.model }}" \
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --run-id "${{ inputs.run_id }}" \
+            --max-cases "${{ inputs.max_cases }}"
 
-      - name: Safety check (OpenAI key required for openai provider)
-        run: |
-          if [ "$PROVIDER" = "openai" ] && [ -z "$OPENAI_API_KEY" ]; then
-            echo "OPENAI_API_KEY is missing. Add it in GitHub repo Settings → Secrets and variables → Actions."
-            exit 1
-          fi
+      - name: Evaluate published run
+        run: python src/run_evaluation.py --dataset dataset/clinical_questions.csv
 
-      - name: Generate answers
-        run: python src/generate_answers.py --dataset dataset/clinical_questions.csv --provider "$PROVIDER" --model "$MODEL_ID" --prompt-version "$PROMPT_VERSION" --max-cases "$MAX_CASES"
-
-      - name: Run evaluation
-        run: python src/run_evaluation.py --dataset dataset/clinical_questions.csv --max-ctx-anchors 8
-
-      - name: Debug results directory
-        run: |
-          echo "PWD: $(pwd)"
-          echo "---- repo root ----"
-          ls -la
-          echo "---- results/ ----"
-          ls -la results || true
-          echo "---- raw_generations.jsonl (head) ----"
-          head -n 2 results/raw_generations.jsonl || true
-          echo "---- evaluation_output.csv exists? ----"
-          test -f results/evaluation_output.csv && echo "YES" || echo "NO"
-
-          
-      - name: Assert evaluation output exists
-        run: |
-          echo "---- results dir listing ----"
-          ls -la results || true
-          echo "---- find evaluation_output.csv ----"
-          find . -maxdepth 4 -name "evaluation_output.csv" -print || true
-          echo "---- raw_generations exists? ----"
-          test -f results/raw_generations.jsonl && echo "raw_generations.jsonl: YES" || echo "raw_generations.jsonl: NO"
-          echo "---- evaluation_output exists? ----"
-          test -f results/evaluation_output.csv && echo "evaluation_output.csv: YES" || (echo "evaluation_output.csv: NO" && exit 1)
-      - name: Summarize results
+      - name: Summarize published run
         run: python src/summarize_results.py --top-n 10
 
       - name: Commit results back to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Only commit result artifacts (avoid committing raw prompts if you later decide to exclude them)
-          git add results/*.csv results/*.jsonl results/*.md || true
+          git add results/*.jsonl results/*.csv results/*.md results/run_manifest.json results/cache/*.jsonl
 
           if git diff --cached --quiet; then
             echo "No result changes to commit."
             exit 0
           fi
 
-          git commit -m "Update evaluation results [skip ci]"
+          git commit -m "Refresh benchmark artifacts [skip ci]"
           git push

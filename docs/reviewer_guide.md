@@ -11,19 +11,22 @@ Read this file if you want the fastest review path through the repo and the most
 1. Read `README.md`
 - Understand what the project is, what it evaluates, what it does not claim, and where the main artifacts live.
 
-2. Open `results/summary.md`
-- See the benchmark snapshot, top-line rates, and worst-case examples.
+2. Open `results/run_manifest.json`
+- Confirm the exact provider / model / run backing the public artifact set.
 
-2a. Optional: read `docs/results_interpretation.md`
+3. Open `results/summary.md`
+- See the benchmark snapshot and top-line interpretation guardrails.
+
+3a. Optional: read `docs/results_interpretation.md`
 - Use this if you want guardrails for interpreting PASS/WARN/FAIL, safety rates, and model comparisons.
 
-3. Read `docs/failure_modes.md`
+4. Read `docs/failure_modes.md`
 - Understand what kinds of failures the benchmark is designed to surface.
 
-4. Read `docs/notable_failures.md`
-- See representative examples of clinically meaningful failure patterns.
+5. Read `docs/notable_failures.md`
+- See the current status of flagged-case review for the published run.
 
-5. Read `docs/maintenance_boundaries.md`
+6. Read `docs/maintenance_boundaries.md`
 - Confirm which files are benchmark-defining and intentionally protected.
 
 ## What This Repo Demonstrates
@@ -61,4 +64,4 @@ If you are reviewing maintenance quality, the benchmark-defining files are inten
 
 ## Suggested Reviewer Takeaway
 
-The main takeaway is not that any specific model is safe for healthcare use. The main takeaway is that even capable models can still fail in clinically meaningful ways, and that a disciplined evaluation harness is necessary before deployment.
+The main takeaway is not that any specific model is safe for healthcare use. The main takeaway is that even capable models can still trigger safety-relevant warnings or failures, and that a disciplined evaluation harness is necessary before deployment.
