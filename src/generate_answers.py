@@ -36,6 +36,14 @@ def default_run_id() -> str:
     return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 
+def classify_benchmark_status(run_kind: str, provider: str, is_full_dataset_run: bool) -> str:
+    if run_kind == "published" and provider != "mock" and is_full_dataset_run:
+        return "canonical_published"
+    if run_kind == "candidate" and provider != "mock" and is_full_dataset_run:
+        return "published_candidate"
+    return "sandbox"
+
+
 def ensure_results_dirs(results_dir: str) -> None:
     paths = build_artifact_paths(results_dir)
     paths.results_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +102,26 @@ def select_client(provider: str, model_id: str):
     if provider == "mock":
         return MockClient()
     raise ValueError(f"Unknown provider: {provider}")
+
+
+def validate_run_request(
+    *,
+    provider: str,
+    run_kind: str,
+    dataset_total_rows: int,
+    selected_case_count: int,
+) -> None:
+    if selected_case_count <= 0:
+        raise ValueError("No dataset rows selected for generation.")
+
+    if run_kind in ("candidate", "published") and provider == "mock":
+        raise ValueError(f"{run_kind.capitalize()} benchmark runs cannot use the mock provider.")
+
+    if run_kind in ("candidate", "published") and selected_case_count != dataset_total_rows:
+        raise ValueError(
+            f"{run_kind.capitalize()} benchmark runs must score the full dataset. "
+            f"Selected {selected_case_count} of {dataset_total_rows} rows."
+        )
 
 
 def build_public_row_from_cache(
@@ -163,10 +191,13 @@ def build_run_manifest(
     model_id: str,
     prompt_version: str,
     run_id: str,
+    run_kind: str,
     rows: List[Dict[str, Any]],
     results_dir: str,
     public_raw_path: str,
     cache_raw_path: str,
+    dataset_total_rows: int,
+    is_full_dataset_run: bool,
     cache_hits: int,
     live_generations: int,
 ) -> Dict[str, Any]:
@@ -181,8 +212,12 @@ def build_run_manifest(
         "provider": provider,
         "model_id": model_id,
         "prompt_version": prompt_version,
+        "run_kind": run_kind,
+        "benchmark_status": classify_benchmark_status(run_kind, provider, is_full_dataset_run),
         "dataset_path": dataset_path,
         "dataset_sha256": sha256_file(dataset_path),
+        "dataset_total_rows": dataset_total_rows,
+        "is_full_dataset_run": is_full_dataset_run,
         "results_dir": results_dir,
         "public_raw_path": public_raw_path,
         "cache_raw_path": cache_raw_path,
@@ -205,6 +240,7 @@ def main(
     max_cases: Optional[int],
     sleep_s: float,
     results_dir: str,
+    run_kind: str = "sandbox",
 ) -> None:
     ensure_results_dirs(results_dir)
     paths = build_artifact_paths(results_dir)
@@ -212,10 +248,26 @@ def main(
     df = pd.read_csv(dataset_path)
     if "case_id" not in df.columns:
         raise ValueError("Dataset must include a 'case_id' column")
+    if df.empty:
+        raise ValueError("Dataset is empty.")
+    if df["case_id"].duplicated().any():
+        dupes = sorted(df[df["case_id"].duplicated()]["case_id"].astype(str).unique().tolist())
+        raise ValueError(f"Dataset contains duplicate case_id values: {dupes}")
+
+    dataset_total_rows = len(df)
 
     # Optional cap (cost control)
     if max_cases is not None:
         df = df.head(max_cases)
+
+    selected_case_count = len(df)
+    validate_run_request(
+        provider=provider,
+        run_kind=run_kind,
+        dataset_total_rows=dataset_total_rows,
+        selected_case_count=selected_case_count,
+    )
+    is_full_dataset_run = selected_case_count == dataset_total_rows
 
     requested_run_id = run_id or default_run_id()
     existing = load_existing_cache(paths.cache_raw_path)
@@ -252,7 +304,14 @@ def main(
             client = select_client(provider, model_id)
 
         t0 = time.time()
-        resp = client.generate(prompt)
+        try:
+            resp = client.generate(prompt)
+        except Exception as exc:
+            print(
+                "Generation failed "
+                f"(case_id={case_id}, provider={provider}, model={model_id}, prompt_version={prompt_version}): {exc}"
+            )
+            raise
         latency_ms = int((time.time() - t0) * 1000)
 
         live_row = build_live_row(
@@ -280,10 +339,13 @@ def main(
         model_id=model_id,
         prompt_version=prompt_version,
         run_id=requested_run_id,
+        run_kind=run_kind,
         rows=public_rows,
         results_dir=results_dir,
         public_raw_path=str(paths.public_raw_path),
         cache_raw_path=str(paths.cache_raw_path),
+        dataset_total_rows=dataset_total_rows,
+        is_full_dataset_run=is_full_dataset_run,
         cache_hits=cache_hits,
         live_generations=live_generations,
     )
@@ -303,10 +365,19 @@ if __name__ == "__main__":
     parser.add_argument("--provider", default="openai", choices=["openai", "mock"], help="LLM provider.")
     parser.add_argument("--model", default="gpt-4o", help="Model id (provider-specific).")
     parser.add_argument("--prompt-version", default="v1", help="Prompt template version string.")
-    parser.add_argument("--run-id", default=None, help="Explicit published run identifier.")
+    parser.add_argument("--run-id", default=None, help="Explicit run identifier.")
     parser.add_argument("--max-cases", type=int, default=None, help="Max number of cases to run (cost control).")
     parser.add_argument("--sleep-s", type=float, default=0.0, help="Sleep between calls (rate-limit friendliness).")
     parser.add_argument("--results-dir", default="results", help="Directory for public and cached artifacts.")
+    parser.add_argument(
+        "--run-kind",
+        default="sandbox",
+        choices=["sandbox", "candidate", "published"],
+        help=(
+            "Run intent: sandbox for exploratory/non-canonical runs, candidate for full-dataset review artifacts, "
+            "published for the checked-in canonical artifact set."
+        ),
+    )
     args = parser.parse_args()
 
     main(
@@ -318,4 +389,5 @@ if __name__ == "__main__":
         max_cases=args.max_cases,
         sleep_s=args.sleep_s,
         results_dir=args.results_dir,
+        run_kind=args.run_kind,
     )

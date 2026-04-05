@@ -1,4 +1,4 @@
-name: Clinical AI Eval (Manual Benchmark Refresh)
+name: Clinical AI Eval (Sandbox Run)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         default: "gpt-4o"
       max_cases:
-        description: "Max cases to run (cost control)"
+        description: "Max cases to run (cost control; may create a partial non-canonical run)"
         required: true
         default: "25"
       prompt_version:
@@ -20,15 +20,15 @@ on:
         required: true
         default: "v1"
       run_id:
-        description: "Explicit benchmark run identifier"
+        description: "Explicit sandbox run identifier"
         required: true
-        default: "manual_refresh"
+        default: "sandbox_run"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  run-eval:
+  run-sandbox-eval:
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
 
@@ -51,7 +51,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate published run
+      - name: Compile Python sources
+        run: python -m py_compile src/*.py tests/*.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Generate sandbox run
         run: |
           python src/generate_answers.py \
             --dataset dataset/clinical_questions.csv \
@@ -59,24 +65,18 @@ jobs:
             --model "${{ inputs.model }}" \
             --prompt-version "${{ inputs.prompt_version }}" \
             --run-id "${{ inputs.run_id }}" \
-            --max-cases "${{ inputs.max_cases }}"
+            --max-cases "${{ inputs.max_cases }}" \
+            --results-dir sandbox_results \
+            --run-kind sandbox
 
-      - name: Evaluate published run
-        run: python src/run_evaluation.py --dataset dataset/clinical_questions.csv
+      - name: Evaluate sandbox run
+        run: python src/run_evaluation.py --dataset dataset/clinical_questions.csv --results-dir sandbox_results
 
-      - name: Summarize published run
-        run: python src/summarize_results.py --top-n 10
+      - name: Summarize sandbox run
+        run: python src/summarize_results.py --top-n 10 --results-dir sandbox_results
 
-      - name: Commit results back to repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/*.jsonl results/*.csv results/*.md results/run_manifest.json results/cache/*.jsonl
-
-          if git diff --cached --quiet; then
-            echo "No result changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Refresh benchmark artifacts [skip ci]"
-          git push
+      - name: Upload sandbox artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-results-${{ inputs.run_id }}
+          path: sandbox_results/

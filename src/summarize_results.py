@@ -29,6 +29,58 @@ def load_run_manifest(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def benchmark_status(manifest: dict) -> str:
+    status = str(manifest.get("benchmark_status", "")).strip().lower()
+    if status:
+        return status
+
+    run_kind = str(manifest.get("run_kind", "")).strip().lower()
+    provider = str(manifest.get("provider", "")).strip().lower()
+    is_full_dataset_run = bool(manifest.get("is_full_dataset_run", True))
+    if run_kind == "published" and provider != "mock" and is_full_dataset_run:
+        return "canonical_published"
+    if run_kind == "candidate" and provider != "mock" and is_full_dataset_run:
+        return "published_candidate"
+    return "sandbox"
+
+
+def build_grade_breakdown(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    if group_col not in df.columns:
+        return pd.DataFrame()
+
+    working = df[[group_col, "overall_grade"]].copy()
+    working[group_col] = working[group_col].fillna("").astype(str)
+    working = working[working[group_col] != ""]
+    if working.empty:
+        return pd.DataFrame()
+
+    grouped = (
+        working.groupby([group_col, "overall_grade"])
+        .size()
+        .unstack(fill_value=0)
+    )
+    for grade in ["PASS", "WARN", "FAIL"]:
+        if grade not in grouped.columns:
+            grouped[grade] = 0
+    grouped["total"] = grouped[["PASS", "WARN", "FAIL"]].sum(axis=1)
+    grouped = grouped.reset_index()
+    return grouped[[group_col, "total", "PASS", "WARN", "FAIL"]].sort_values(by=[group_col], ascending=[True])
+
+
+def append_breakdown_table(lines: list[str], title: str, label: str, table: pd.DataFrame) -> None:
+    lines.append(f"\n## {title}\n")
+    if table.empty:
+        lines.append("- (not available)\n")
+        return
+
+    lines.append(f"| {label} | total | PASS | WARN | FAIL |\n")
+    lines.append("|---|---:|---:|---:|---:|\n")
+    for _, row in table.iterrows():
+        lines.append(
+            f"| {row[label]} | {int(row['total'])} | {int(row['PASS'])} | {int(row['WARN'])} | {int(row['FAIL'])} |\n"
+        )
+
+
 def main(top_n: int, results_dir: str) -> None:
     paths = build_artifact_paths(results_dir)
     if not paths.evaluation_output_path.exists():
@@ -55,13 +107,26 @@ def main(top_n: int, results_dir: str) -> None:
 
 
     # Normalize
-    for col in ["format_compliance", "citation_validity", "required_citations", "uncertainty_alignment", "faithfulness_proxy"]:
+    for col in [
+        "format_compliance",
+        "citation_validity",
+        "required_citations",
+        "uncertainty_alignment",
+        "gold_key_points_coverage",
+        "faithfulness_proxy",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     total = len(df)
     if total == 0:
         raise ValueError("evaluation_output.csv is empty")
+
+    status = benchmark_status(manifest)
+    canonical_published = status == "canonical_published"
+    dataset_total_rows = int(manifest.get("dataset_total_rows", manifest.get("case_count", total)))
+    case_count = int(manifest.get("case_count", total))
+    is_full_dataset_run = bool(manifest.get("is_full_dataset_run", case_count == dataset_total_rows))
 
     grade_counts = df["overall_grade"].value_counts(dropna=False).to_dict()
 
@@ -74,6 +139,7 @@ def main(top_n: int, results_dir: str) -> None:
         "citation_validity": safe_mean(df["citation_validity"]) if "citation_validity" in df else 0.0,
         "required_citations": safe_mean(df["required_citations"]) if "required_citations" in df else 0.0,
         "uncertainty_alignment": safe_mean(df["uncertainty_alignment"]) if "uncertainty_alignment" in df else 0.0,
+        "gold_key_points_coverage": safe_mean(df["gold_key_points_coverage"]) if "gold_key_points_coverage" in df else 0.0,
         "format_compliance": safe_mean(df["format_compliance"]) if "format_compliance" in df else 0.0,
     }
 
@@ -97,28 +163,64 @@ def main(top_n: int, results_dir: str) -> None:
     )
 
     worst = df_sorted.head(top_n)[
-        ["case_id", "category", "risk_level", "model_id", "prompt_version", "overall_grade", "faithfulness_proxy", "uncertainty_alignment", "failure_tags"]
+        [
+            "case_id",
+            "category",
+            "risk_level",
+            "model_id",
+            "prompt_version",
+            "overall_grade",
+            "faithfulness_proxy",
+            "uncertainty_alignment",
+            "failure_tags",
+        ]
     ]
+
+    category_breakdown = build_grade_breakdown(df, "category")
+    risk_breakdown = build_grade_breakdown(df, "risk_level")
 
     lines = []
     lines.append(f"# Clinical AI Evaluation Sandbox — Summary\n")
-    lines.append(f"_Published run: `{manifest['provider']}` / `{manifest['model_id']}` / `{manifest['run_id']}`_\n")
+    if status == "canonical_published":
+        run_label = "Published run"
+    elif status == "published_candidate":
+        run_label = "Benchmark candidate"
+    else:
+        run_label = "Run"
+    lines.append(f"_{run_label}: `{manifest['provider']}` / `{manifest['model_id']}` / `{manifest['run_id']}`_\n")
     lines.append("\n## Run Identity\n")
     lines.append(f"- Provider: **{manifest['provider']}**\n")
     lines.append(f"- Model: **{manifest['model_id']}**\n")
     lines.append(f"- Run ID: **{manifest['run_id']}**\n")
     lines.append(f"- Prompt version: **{manifest['prompt_version']}**\n")
-    lines.append(f"- Cases in published run: **{manifest['case_count']}**\n")
+    lines.append(f"- Run kind: **{manifest.get('run_kind', 'published' if canonical_published else 'sandbox')}**\n")
+    lines.append(f"- Cases in this run: **{case_count}**\n")
+    lines.append(f"- Dataset coverage: **{case_count} / {dataset_total_rows}** cases\n")
     if manifest.get("source_run_ids"):
         lines.append(f"- Source generation run ids: **{', '.join(manifest['source_run_ids'])}**\n")
 
-    lines.append(f"## Scorecard\n")
+    lines.append("\n## Benchmark Status\n")
+    if status == "canonical_published":
+        lines.append("- Status: **Canonical published benchmark run**\n")
+    elif status == "published_candidate":
+        lines.append("- Status: **Published benchmark candidate (non-canonical)**\n")
+        lines.append("- This run is a review candidate and should not replace the checked-in published benchmark artifacts without review.\n")
+    else:
+        lines.append("- Status: **Sandbox / non-canonical run**\n")
+        lines.append("- This run should not replace the checked-in published benchmark artifacts without review.\n")
+    if not is_full_dataset_run:
+        lines.append("- This run used only a subset of the dataset and is not comparable to the full published benchmark.\n")
+    if str(manifest.get("provider", "")).strip().lower() == "mock":
+        lines.append("- This run used the `mock` provider and is intended for pipeline validation or exploratory review.\n")
+
+    lines.append("\n## Scorecard\n")
     lines.append(f"- Total cases scored: **{total}**\n")
     lines.append(f"- PASS: **{grade_counts.get('PASS', 0)}** ({pct(pass_rate)})\n")
     lines.append(f"- WARN: **{grade_counts.get('WARN', 0)}** ({pct(warn_rate)})\n")
     lines.append(f"- FAIL: **{grade_counts.get('FAIL', 0)}** ({pct(fail_rate)})\n")
     lines.append("\n## Interpretation Guardrail\n")
-    lines.append("- This published run is a heuristic benchmark artifact, not evidence of clinical safety or deployment readiness.\n")
+    lines.append("- This run is a heuristic benchmark artifact, not evidence of clinical safety or deployment readiness.\n")
+    lines.append("- The current evaluator uses non-empty section checks and rationale-scoped required citations.\n")
     lines.append("- Historical cached generations are stored separately under `results/cache/` and are not the published benchmark set.\n")
     lines.append("\n## Heuristic Signal Rates\n")
     lines.append(f"- Unsafe recommendation rate: **{unsafe_rate:.1%}**\n")
@@ -127,6 +229,10 @@ def main(top_n: int, results_dir: str) -> None:
     lines.append(f"\n## Mean metric scores\n")
     for k, v in metric_means.items():
         lines.append(f"- {k}: **{v:.3f}**\n")
+    lines.append("- `gold_key_points_coverage` is a supporting checklist-style metric and should be read alongside the other scores and flagged cases.\n")
+
+    append_breakdown_table(lines, "Category Breakdown", "category", category_breakdown)
+    append_breakdown_table(lines, "Risk Breakdown", "risk_level", risk_breakdown)
 
     lines.append(f"\n## Failure tag counts\n")
     if not tag_counts:

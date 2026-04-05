@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List
@@ -12,6 +13,10 @@ if __package__ in (None, ""):
 
 from src.artifact_paths import build_artifact_paths
 from src.metrics import evaluate_case, normalize_pipe_list
+
+
+def sha256_file(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -49,6 +54,7 @@ def validate_public_run(rows: List[Dict[str, Any]], manifest: Dict[str, Any]) ->
     expected_model_id = str(manifest["model_id"])
 
     seen_case_ids = set()
+    row_case_ids: List[str] = []
     for row in rows:
         if str(row.get("run_id", "")) != expected_run_id:
             raise ValueError(f"Unexpected run_id in public raw generations: {row.get('run_id')}")
@@ -63,11 +69,32 @@ def validate_public_run(rows: List[Dict[str, Any]], manifest: Dict[str, Any]) ->
         if case_id in seen_case_ids:
             raise ValueError(f"Duplicate case_id in public raw generations: {case_id}")
         seen_case_ids.add(case_id)
+        row_case_ids.append(case_id)
 
     expected_case_count = int(manifest.get("case_count", len(rows)))
     if len(rows) != expected_case_count:
         raise ValueError(
             f"Public raw generations count mismatch: expected {expected_case_count}, found {len(rows)}"
+        )
+
+    expected_case_ids = [str(case_id) for case_id in manifest.get("case_ids", [])]
+    if expected_case_ids and row_case_ids != expected_case_ids:
+        raise ValueError(
+            "Public raw generations case order/content mismatch with run manifest: "
+            f"expected {expected_case_ids}, found {row_case_ids}"
+        )
+
+
+def validate_dataset_against_manifest(dataset_path: str, manifest: Dict[str, Any]) -> None:
+    expected_sha = str(manifest.get("dataset_sha256", "")).strip()
+    if not expected_sha:
+        return
+
+    actual_sha = sha256_file(dataset_path)
+    if actual_sha != expected_sha:
+        raise ValueError(
+            "Dataset contents do not match the run manifest. "
+            f"Expected sha256 {expected_sha}, found {actual_sha}."
         )
 
 
@@ -84,6 +111,7 @@ def main(dataset_path: str, results_dir: str) -> None:
 
     # Load generations
     manifest = load_run_manifest(paths.run_manifest_path)
+    validate_dataset_against_manifest(dataset_path, manifest)
     gen_rows = read_jsonl(paths.public_raw_path)
     validate_public_run(gen_rows, manifest)
 
@@ -108,6 +136,7 @@ def main(dataset_path: str, results_dir: str) -> None:
     for _, row in df.iterrows():
         required_cits = normalize_pipe_list(row.get("required_citations", ""))
         forbidden_actions = normalize_pipe_list(row.get("forbidden_actions", ""))
+        gold_key_points = normalize_pipe_list(row.get("gold_key_points", ""))
         expected_behavior = str(row.get("expected_behavior", "")).strip()
 
         metric = evaluate_case(
@@ -116,6 +145,7 @@ def main(dataset_path: str, results_dir: str) -> None:
             expected_behavior=expected_behavior,
             required_citations=required_cits,
             forbidden_actions=forbidden_actions,
+            gold_key_points=gold_key_points,
         )
 
         record: Dict[str, Any] = {
@@ -156,6 +186,8 @@ def main(dataset_path: str, results_dir: str) -> None:
                     "failure_tags": "|".join(metric.failure_tags) if metric.failure_tags else "",
                     "question": row.get("question", ""),
                     "provided_context": row.get("provided_context", ""),
+                    "gold_key_points": row.get("gold_key_points", ""),
+                    "gold_key_points_coverage": metric.scores.get("gold_key_points_coverage", 0.0),
                     "answer_text": row.get("answer_text", ""),
                 }
             )

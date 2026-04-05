@@ -6,8 +6,14 @@ _Published run: `openai` / `gpt-4o` / `20260305_045410`_
 - Model: **gpt-4o**
 - Run ID: **20260305_045410**
 - Prompt version: **v1**
-- Cases in published run: **25**
+- Run kind: **published**
+- Cases in this run: **25**
+- Dataset coverage: **25 / 25** cases
 - Source generation run ids: **20260305_045410**
+
+## Benchmark Status
+- Status: **Canonical published benchmark run**
+
 ## Scorecard
 - Total cases scored: **25**
 - PASS: **22** (88.0%)
@@ -15,7 +21,8 @@ _Published run: `openai` / `gpt-4o` / `20260305_045410`_
 - FAIL: **0** (0.0%)
 
 ## Interpretation Guardrail
-- This published run is a heuristic benchmark artifact, not evidence of clinical safety or deployment readiness.
+- This run is a heuristic benchmark artifact, not evidence of clinical safety or deployment readiness.
+- The current evaluator uses non-empty section checks and rationale-scoped required citations.
 - Historical cached generations are stored separately under `results/cache/` and are not the published benchmark set.
 
 ## Heuristic Signal Rates
@@ -28,7 +35,27 @@ _Published run: `openai` / `gpt-4o` / `20260305_045410`_
 - citation_validity: **1.000**
 - required_citations: **1.000**
 - uncertainty_alignment: **0.932**
+- gold_key_points_coverage: **0.520**
 - format_compliance: **1.000**
+- `gold_key_points_coverage` is a supporting checklist-style metric and should be read alongside the other scores and flagged cases.
+
+## Category Breakdown
+| category | total | PASS | WARN | FAIL |
+|---|---:|---:|---:|---:|
+| diagnosis | 4 | 3 | 1 | 0 |
+| guideline | 3 | 3 | 0 | 0 |
+| hallucination | 3 | 2 | 1 | 0 |
+| medication | 4 | 4 | 0 | 0 |
+| safety | 5 | 5 | 0 | 0 |
+| triage | 3 | 2 | 1 | 0 |
+| uncertainty | 3 | 3 | 0 | 0 |
+
+## Risk Breakdown
+| risk_level | total | PASS | WARN | FAIL |
+|---|---:|---:|---:|---:|
+| high | 9 | 7 | 2 | 0 |
+| low | 3 | 3 | 0 | 0 |
+| medium | 13 | 12 | 1 | 0 |
 
 ## Failure tag counts
 - UNSUPPORTED_SPECIFICITY: **2**

@@ -6,7 +6,7 @@ This repository is meant to signal evaluation judgment, safety-first thinking, a
 
 Read this file if you want the fastest overview of what the project is, what it evaluates, what artifacts it produces, and what it does not claim.
 
-The checked-in public artifacts represent one explicit published run:
+The checked-in public artifacts represent one explicit canonical published run:
 
 - provider: `openai`
 - model: `gpt-4o`
@@ -137,28 +137,50 @@ The checked-in benchmark artifacts currently publish one explicit run:
 Use `results/run_manifest.json` and `results/summary.md` together when reviewing the public benchmark set.
 
 Important guardrail: a fully passing run on this heuristic benchmark is not evidence of clinical safety or deployment readiness.
+The checked-in published artifacts reflect the current stricter evaluator rules, including non-empty section checks and rationale-scoped required citations.
 
 ## Running The Project
 
-This repo separates offline verification from manual benchmark refreshes.
+This repo separates offline verification, exploratory sandbox runs, and published benchmark candidates.
 
 ### Offline verification
 
 The `Offline Verification` workflow compiles the repo, runs the unit tests, regenerates the published run from `results/cache/raw_generations_cache.jsonl`, and checks that the public artifacts reproduce exactly.
 
-### Manual benchmark refresh
+### Sandbox runs
 
-The `Clinical AI Eval (Manual Benchmark Refresh)` workflow is the API-backed path for refreshing the published run.
+The `Clinical AI Eval (Sandbox Run)` workflow is the API-backed path for exploratory runs.
+
+Use it for:
+
+- partial-dataset smoke tests
+- prompt iteration checks
+- provider comparisons
+- `mock`-provider validation runs
+
+Sandbox runs write to `sandbox_results/` inside the workflow and upload artifacts for review. They do not overwrite `results/`.
+
+### Published benchmark candidate
+
+The `Clinical AI Eval (Published Benchmark Candidate)` workflow is the guarded path for generating a full-dataset benchmark candidate for manual review.
+
+It:
+
+- forces the full dataset
+- rejects the `mock` provider
+- runs compile + unit-test checks first
+- generates a live run, then rebuilds the candidate artifact set from cache
+- verifies exact reproducibility before uploading the candidate artifacts
+
+Published candidates are uploaded for manual review rather than pushed directly back to the repo.
 
 Expected workflow inputs:
 
 | Input | Example | Description |
 |---|---|---|
-| `provider` | `openai` | LLM provider |
 | `model` | `gpt-4o` | Model used for generation |
-| `max_cases` | `25` | Maximum dataset rows to run |
 | `prompt_version` | `v1` | Prompt label tracked in artifacts |
-| `run_id` | `20260330_refresh` | Explicit published run identifier |
+| `run_id` | `20260330_candidate` | Explicit benchmark-candidate run identifier |
 
 ### Local script entry points
 
@@ -167,6 +189,9 @@ If a reviewer wants to inspect the mechanics, the main scripts are:
 - `src/generate_answers.py`
 - `src/run_evaluation.py`
 - `src/summarize_results.py`
+
+`src/generate_answers.py` supports `--run-kind sandbox`, `--run-kind candidate`, and `--run-kind published`.
+Use `sandbox` for exploratory or partial runs, `candidate` for full-dataset review artifacts, and `published` only for the checked-in canonical benchmark set and offline reproducibility.
 
 ## Documentation Guide
 

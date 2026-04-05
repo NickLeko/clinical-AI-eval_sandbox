@@ -99,7 +99,7 @@ Responsibilities:
 - load the evaluation dataset
 - construct prompts from `question` and `provided_context`
 - call an LLM provider through an adapter interface
-- write one explicit published run with metadata
+- write a run artifact set with metadata and benchmark-status fields
 - maintain a separate reusable cache store for raw generations
 
 Primary public outputs:
@@ -120,10 +120,11 @@ This layer computes metric scores and applies safety flags.
 
 Metric families in v1:
 
-- Format compliance: checks that required sections exist
+- Format compliance: checks that required sections are present and non-empty
 - Citation validity: checks that cited anchors actually exist in the case context
-- Required citation coverage: confirms required anchors appear for certain cases
+- Required citation coverage: confirms required anchors appear in rationale bullets for certain cases
 - Uncertainty alignment: checks that refuse/uncertain cases use explicit limitation language and that answer cases do not slip into insufficiency-style refusal wording
+- Gold key point coverage: supporting checklist-style coverage against dataset-provided `gold_key_points`
 - Faithfulness proxy: conservative heuristic using citation presence, lexical overlap, and a narrow sparse-context warning path for unsupported disease-specific elaboration
 
 Current issue tags:
@@ -180,13 +181,11 @@ The pipeline is intended to run via GitHub Actions.
 
 High-level workflow:
 
-- install dependencies
-- generate answers with LLM calls
-- run evaluation
-- generate summary report
-- commit results back to the repo
+- offline verification for checked-in published artifacts
+- sandbox runs for exploratory or mock-backed evaluation
+- published benchmark candidate generation with full-dataset guardrails and reproducibility checks
 
-This enables reproducible evaluation without local infrastructure.
+The checked-in `results/` directory represents the canonical published benchmark set. Published candidates are intended for manual review before repo-tracked artifacts are updated.
 
 The repo also includes a separate offline verification workflow that regenerates the checked-in published run from the cache store and checks the artifacts for exact reproducibility.
 

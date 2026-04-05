@@ -6,7 +6,9 @@ Read this file if you want guardrails for understanding PASS / WARN / FAIL, safe
 
 ## What The Results Represent
 
-The reported results represent behavior on one explicit published provider / model / run under this repository's fixed evaluation dataset, prompt structure, scoring heuristics, and artifact pipeline.
+The checked-in `results/` directory represents behavior on one explicit canonical published provider / model / run under this repository's fixed evaluation dataset, prompt structure, scoring heuristics, and artifact pipeline.
+
+Sandbox and benchmark-candidate artifact sets may use the same file schema, but they should be treated as non-canonical unless `results/run_manifest.json` marks them `benchmark_status: canonical_published`.
 
 They are best understood as:
 

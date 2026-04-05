@@ -17,6 +17,8 @@ The main benchmark artifacts are:
 
 These files serve different review purposes. They should be read together rather than as substitutes for one another.
 
+The checked-in `results/` directory is the canonical published artifact set for this repo version. Sandbox and benchmark-candidate runs may use the same file shapes outside the checked-in repo, but those runs should be interpreted from their `run_kind`, `benchmark_status`, and dataset-coverage fields rather than assumed to be canonical.
+
 ## `results/raw_generations.jsonl`
 
 What it contains:
@@ -42,9 +44,10 @@ What it does not mean:
 
 What it contains:
 
-- the explicit `provider`, `model_id`, and `run_id` for the published artifact set
-- dataset hash and case count
-- provenance about whether the published raw file was regenerated from cache or fresh model calls
+- the explicit `provider`, `model_id`, and `run_id` for the artifact set
+- `run_kind` and `benchmark_status` so reviewers can distinguish canonical published runs from sandbox or candidate artifacts
+- dataset hash, dataset coverage, and case count
+- provenance about whether the raw file was regenerated from cache or fresh model calls
 
 Why it matters:
 
@@ -102,6 +105,7 @@ What it contains:
 - PASS / WARN / FAIL distribution
 - safety signal rates
 - mean metric scores
+- canonical vs non-canonical status plus dataset coverage
 - failure tag counts
 - a short worst-case table
 

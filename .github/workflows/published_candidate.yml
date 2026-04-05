@@ -1,0 +1,107 @@
+name: Clinical AI Eval (Published Benchmark Candidate)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model id (OpenAI)"
+        required: true
+        default: "gpt-4o"
+      prompt_version:
+        description: "Prompt version label"
+        required: true
+        default: "v1"
+      run_id:
+        description: "Explicit benchmark-candidate run identifier"
+        required: true
+        default: "published_candidate"
+
+permissions:
+  contents: read
+
+jobs:
+  build-published-candidate:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PYTHONPATH: "."
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m py_compile src/*.py tests/*.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Generate live benchmark candidate
+        run: |
+          python src/generate_answers.py \
+            --dataset dataset/clinical_questions.csv \
+            --provider openai \
+            --model "${{ inputs.model }}" \
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --run-id "${{ inputs.run_id }}" \
+            --run-kind candidate
+
+      - name: Replay benchmark candidate artifacts from cache
+        run: |
+          python src/generate_answers.py \
+            --dataset dataset/clinical_questions.csv \
+            --provider openai \
+            --model "${{ inputs.model }}" \
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --run-id "${{ inputs.run_id }}" \
+            --run-kind candidate
+          python src/run_evaluation.py --dataset dataset/clinical_questions.csv
+          python src/summarize_results.py --top-n 10
+
+      - name: Snapshot candidate artifacts
+        run: |
+          mkdir -p /tmp/candidate_baseline
+          cp results/raw_generations.jsonl /tmp/candidate_baseline/raw_generations.jsonl
+          cp results/evaluation_output.csv /tmp/candidate_baseline/evaluation_output.csv
+          cp results/flagged_cases.jsonl /tmp/candidate_baseline/flagged_cases.jsonl
+          cp results/summary.md /tmp/candidate_baseline/summary.md
+          cp results/run_manifest.json /tmp/candidate_baseline/run_manifest.json
+
+      - name: Rebuild candidate artifacts from cache
+        run: |
+          python src/generate_answers.py \
+            --dataset dataset/clinical_questions.csv \
+            --provider openai \
+            --model "${{ inputs.model }}" \
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --run-id "${{ inputs.run_id }}" \
+            --run-kind candidate
+          python src/run_evaluation.py --dataset dataset/clinical_questions.csv
+          python src/summarize_results.py --top-n 10
+
+      - name: Assert candidate artifacts are reproducible
+        run: |
+          diff -u /tmp/candidate_baseline/raw_generations.jsonl results/raw_generations.jsonl
+          diff -u /tmp/candidate_baseline/evaluation_output.csv results/evaluation_output.csv
+          diff -u /tmp/candidate_baseline/flagged_cases.jsonl results/flagged_cases.jsonl
+          diff -u /tmp/candidate_baseline/summary.md results/summary.md
+          diff -u /tmp/candidate_baseline/run_manifest.json results/run_manifest.json
+
+      - name: Upload published benchmark candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-benchmark-candidate-${{ inputs.run_id }}
+          path: results/
