@@ -533,7 +533,10 @@ def score_faithfulness_proxy(
     - Penalize if answer contains many action verbs but context is short
     - Reward if citations are present AND answer reuses key phrases from context
 
-    Returns (score, hallucination_suspected)
+    Returns:
+    - score
+    - hallucination_suspected
+    - unsupported_specificity_suspected
     """
     a = (answer or "").lower()
     ctx = (provided_context or "").lower()

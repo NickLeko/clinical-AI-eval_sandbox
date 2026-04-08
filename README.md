@@ -154,6 +154,15 @@ This repo separates offline verification, exploratory sandbox runs, and publishe
 
 The `Offline Verification` workflow compiles the repo, runs the unit tests, regenerates the published run from `results/cache/raw_generations_cache.jsonl`, and checks that the public artifacts reproduce exactly.
 
+### Quick local verification
+
+For a fast local health check before reviewing deeper:
+
+```bash
+pytest -q
+python -m py_compile src/*.py tests/*.py
+```
+
 ### Sandbox runs
 
 The `Clinical AI Eval (Sandbox Run)` workflow is the API-backed path for exploratory runs.
@@ -206,6 +215,8 @@ Supported generation providers for `src/generate_answers.py`:
 - `anthropic` using `ANTHROPIC_API_KEY`
 - `gemini` using `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - `mock` for deterministic pipeline validation without API access
+
+The multi-provider support above exists at the generation-script layer. The checked-in GitHub Actions workflows currently wire `openai` for API-backed runs and `mock` for pipeline validation; using `anthropic` or `gemini` in CI would require extending workflow secrets and inputs.
 
 ## Documentation Guide
 
