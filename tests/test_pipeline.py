@@ -3,10 +3,12 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
-from src.generate_answers import classify_benchmark_status, main as generate_answers_main
+from src.generate_answers import classify_benchmark_status, main as generate_answers_main, select_client
+from src.llm_clients import AnthropicClient, GeminiClient, MockClient, OpenAIClient
 from src.run_evaluation import main as run_evaluation_main
 from src.summarize_results import main as summarize_results_main
 
@@ -14,6 +16,8 @@ from src.summarize_results import main as summarize_results_main
 class OfflinePipelineTests(unittest.TestCase):
     def test_candidate_status_is_non_canonical(self) -> None:
         self.assertEqual(classify_benchmark_status("candidate", "openai", True), "published_candidate")
+        self.assertEqual(classify_benchmark_status("candidate", "anthropic", True), "published_candidate")
+        self.assertEqual(classify_benchmark_status("candidate", "gemini", True), "published_candidate")
         self.assertEqual(classify_benchmark_status("published", "openai", True), "canonical_published")
 
     def test_mock_pipeline_builds_artifacts_in_temp_results_dir(self) -> None:
@@ -192,6 +196,25 @@ class OfflinePipelineTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "case order/content mismatch"):
                 run_evaluation_main(dataset_path=str(dataset_path), results_dir=str(results_dir))
+
+    def test_select_client_supports_all_configured_providers(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "test-openai-key",
+                "ANTHROPIC_API_KEY": "test-anthropic-key",
+                "GEMINI_API_KEY": "test-gemini-key",
+            },
+            clear=False,
+        ):
+            self.assertIsInstance(select_client("openai", "gpt-4o"), OpenAIClient)
+            self.assertIsInstance(select_client("anthropic", "claude-3-5-sonnet-latest"), AnthropicClient)
+            self.assertIsInstance(select_client("gemini", "gemini-1.5-pro"), GeminiClient)
+            self.assertIsInstance(select_client("mock", "mock-clinical-model"), MockClient)
+
+    def test_select_client_rejects_unknown_provider(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unknown provider"):
+            select_client("unknown-provider", "model-id")
 
 
 if __name__ == "__main__":

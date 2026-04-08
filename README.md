@@ -15,6 +15,13 @@ The checked-in public artifacts represent one explicit canonical published run:
 
 Historical raw generations used for cache/reproducibility are stored separately under `results/cache/` and are not the published benchmark result set.
 
+The generation layer currently supports these providers:
+
+- `openai`
+- `anthropic`
+- `gemini`
+- `mock`
+
 ## What This Project Is
 
 This project simulates a pre-deployment healthcare AI evaluation workflow:
@@ -192,6 +199,13 @@ If a reviewer wants to inspect the mechanics, the main scripts are:
 
 `src/generate_answers.py` supports `--run-kind sandbox`, `--run-kind candidate`, and `--run-kind published`.
 Use `sandbox` for exploratory or partial runs, `candidate` for full-dataset review artifacts, and `published` only for the checked-in canonical benchmark set and offline reproducibility.
+
+Supported generation providers for `src/generate_answers.py`:
+
+- `openai` using `OPENAI_API_KEY`
+- `anthropic` using `ANTHROPIC_API_KEY`
+- `gemini` using `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+- `mock` for deterministic pipeline validation without API access
 
 ## Documentation Guide
 

@@ -16,8 +16,11 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.artifact_paths import build_artifact_paths
-from src.llm_clients import OpenAIClient, MockClient
+from src.llm_clients import AnthropicClient, GeminiClient, MockClient, OpenAIClient
 from src.prompt_templates import build_clinical_prompt
+
+
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "gemini", "mock")
 
 
 def utc_now_iso() -> str:
@@ -96,12 +99,24 @@ def append_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def normalize_provider_name(provider: str) -> str:
+    return str(provider).strip().lower()
+
+
 def select_client(provider: str, model_id: str):
-    if provider == "openai":
-        return OpenAIClient(model=model_id)
-    if provider == "mock":
-        return MockClient()
-    raise ValueError(f"Unknown provider: {provider}")
+    provider_name = normalize_provider_name(provider)
+    client_factories = {
+        "openai": lambda: OpenAIClient(model=model_id),
+        "anthropic": lambda: AnthropicClient(model=model_id),
+        "gemini": lambda: GeminiClient(model=model_id),
+        "mock": MockClient,
+    }
+
+    if provider_name not in client_factories:
+        supported = ", ".join(SUPPORTED_PROVIDERS)
+        raise ValueError(f"Unknown provider: {provider}. Supported providers: {supported}")
+
+    return client_factories[provider_name]()
 
 
 def validate_run_request(
@@ -111,6 +126,7 @@ def validate_run_request(
     dataset_total_rows: int,
     selected_case_count: int,
 ) -> None:
+    provider = normalize_provider_name(provider)
     if selected_case_count <= 0:
         raise ValueError("No dataset rows selected for generation.")
 
@@ -242,6 +258,7 @@ def main(
     results_dir: str,
     run_kind: str = "sandbox",
 ) -> None:
+    provider = normalize_provider_name(provider)
     ensure_results_dirs(results_dir)
     paths = build_artifact_paths(results_dir)
 
@@ -362,7 +379,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate LLM answers for clinical eval dataset.")
     parser.add_argument("--dataset", default="dataset/clinical_questions.csv", help="Path to dataset CSV.")
-    parser.add_argument("--provider", default="openai", choices=["openai", "mock"], help="LLM provider.")
+    parser.add_argument("--provider", default="openai", choices=list(SUPPORTED_PROVIDERS), help="LLM provider.")
     parser.add_argument("--model", default="gpt-4o", help="Model id (provider-specific).")
     parser.add_argument("--prompt-version", default="v1", help="Prompt template version string.")
     parser.add_argument("--run-id", default=None, help="Explicit run identifier.")
