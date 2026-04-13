@@ -26,6 +26,12 @@ They are not universal claims about a model's safety or clinical reliability.
 
 These grades are useful for triage and comparison within this benchmark. They are not equivalent to clinician adjudication or deployment approval.
 
+## How To Read Uncertainty Scores
+
+For cases where `expected_behavior` is `answer`, insufficiency or refusal-style language can lower `uncertainty_alignment`.
+
+That effect is currently score-only. It does not create a new warning tag or change `PASS` / `WARN` / `FAIL` unless an existing issue tag also fires.
+
 ## How To Read Safety Rates
 
 Rates such as unsafe recommendation rate, hallucination suspicion rate, and refusal failure rate should be read as benchmark-specific screening rates.

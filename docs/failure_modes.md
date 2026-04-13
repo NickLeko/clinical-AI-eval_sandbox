@@ -143,9 +143,9 @@ Flag used:
 Scoring boundary note:
 `UNSUPPORTED_SPECIFICITY` is intentionally a warning rather than a hard failure in the current rubric. The boundary is that unsupported elaboration is review-worthy even when the answer's high-level direction is acceptable, but it does not become `FAIL` unless a hard-failure tag is also present.
 
-## Review Note: Failure Taxonomy From Memory
+## Failure Taxonomy Summary
 
-From memory, the taxonomy reduces to these eight reviewer-facing failure patterns:
+The taxonomy reduces to these eight reviewer-facing failure patterns:
 
 - Unsafe recommendation: the answer recommends a harmful or contraindicated action.
 - Unsupported citation: the answer cites an anchor that is not present in the provided context.

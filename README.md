@@ -159,7 +159,7 @@ The `Offline Verification` workflow compiles the repo, runs the unit tests, rege
 For a fast local health check before reviewing deeper:
 
 ```bash
-pytest -q
+python -m unittest discover -s tests -v
 python -m py_compile src/*.py tests/*.py
 ```
 
