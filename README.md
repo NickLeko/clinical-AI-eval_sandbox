@@ -80,7 +80,8 @@ clinical-AI-eval_sandbox/
 │   ├── generate_answers.py         # Runs model generation and caches outputs
 │   ├── metrics.py                  # Scoring and safety flags
 │   ├── run_evaluation.py           # Applies metrics to generations
-│   └── summarize_results.py        # Builds markdown summary
+│   ├── summarize_results.py        # Builds markdown summary
+│   └── build_reviewer_report.py    # Builds derived local HTML reviewer report
 ├── results/
 │   ├── raw_generations.jsonl       # One explicit published provider/model/run
 │   ├── run_manifest.json           # Published run identity and provenance
@@ -91,10 +92,17 @@ clinical-AI-eval_sandbox/
 │       └── raw_generations_cache.jsonl   # Reusable raw-generation cache/history store
 ├── docs/
 │   ├── architecture.md             # System overview
+│   ├── artifacts_guide.md          # File-by-file artifact guide
+│   ├── REVIEWER_WORKFLOW.md        # Artifact trust map and review order
+│   ├── reviewer_guide.md           # Fast reviewer walkthrough
+│   ├── results_interpretation.md   # Benchmark interpretation guidance
 │   ├── safety_case.md              # Safety framing and hazards
 │   ├── failure_modes.md            # Failure taxonomy and known limitations
 │   ├── notable_failures.md         # Representative cases
+│   ├── CODEX_RUNBOOK.md            # Repo-local Codex workflow
 │   └── maintenance_boundaries.md   # Eval-sensitive change policy
+├── AGENTS.md                       # Codex operating constraints
+├── Makefile                        # Local verification helpers
 ├── requirements.txt
 └── README.md
 ```
@@ -104,9 +112,10 @@ clinical-AI-eval_sandbox/
 For a first pass, a reviewer can understand the project in this order:
 
 1. Read this README for project scope, benchmark boundaries, and artifact map.
-2. Open `results/summary.md` for the headline benchmark view.
-3. Check `docs/failure_modes.md` and `docs/notable_failures.md` for safety interpretation.
-4. Inspect `src/metrics.py`, `src/run_evaluation.py`, and `src/prompt_templates.py` if they want to audit the benchmark mechanics.
+2. Use `docs/REVIEWER_WORKFLOW.md` for the exact artifact review order and source-of-truth guidance.
+3. Open `results/summary.md` for the headline benchmark view.
+4. Check `docs/failure_modes.md` and `docs/notable_failures.md` for safety interpretation.
+5. Inspect `src/metrics.py`, `src/run_evaluation.py`, and `src/prompt_templates.py` if they want to audit the benchmark mechanics.
 
 ## Evaluation Pipeline
 
@@ -131,6 +140,16 @@ The main review artifacts are:
 - `results/flagged_cases.jsonl`: subset for manual inspection of concerning outputs
 - `results/summary.md`: compact benchmark report with rates, means, and worst cases
 - `results/cache/raw_generations_cache.jsonl`: reusable raw-generation cache/history store that is not itself the public benchmark set
+
+The HTML reviewer report is a generated convenience view, not a canonical benchmark artifact. It is derived from `run_manifest.json`, `evaluation_output.csv`, and `flagged_cases.jsonl` without changing scoring, prompts, datasets, or published artifact meaning.
+
+To generate it locally:
+
+```bash
+python src/build_reviewer_report.py --results-dir results --output results/reviewer_report.html
+```
+
+Then open `results/reviewer_report.html` in a browser. The file is self-contained, ignored by git, and includes run metadata, grade distribution, failure tag counts, a filterable flagged-case table, and per-case details for the validated overlap fields.
 
 ## Current Published Run
 
@@ -162,6 +181,18 @@ For a fast local health check before reviewing deeper:
 python -m unittest discover -s tests -v
 python -m py_compile src/*.py tests/*.py
 ```
+
+The same checks are available through:
+
+```bash
+make verify
+```
+
+### Working with Codex
+
+Repo-local Codex guidance lives in `AGENTS.md`, with the operational runbook in `docs/CODEX_RUNBOOK.md`.
+
+Future Codex sessions should classify changes as docs-only maintenance, derived tooling, sandbox support, benchmark revision, or result refresh before editing. Benchmark-defining files and checked-in `results/` artifacts should only change when that is the explicit task.
 
 ### Sandbox runs
 
@@ -205,6 +236,7 @@ If a reviewer wants to inspect the mechanics, the main scripts are:
 - `src/generate_answers.py`
 - `src/run_evaluation.py`
 - `src/summarize_results.py`
+- `src/build_reviewer_report.py`
 
 `src/generate_answers.py` supports `--run-kind sandbox`, `--run-kind candidate`, and `--run-kind published`.
 Use `sandbox` for exploratory or partial runs, `candidate` for full-dataset review artifacts, and `published` only for the checked-in canonical benchmark set and offline reproducibility.
@@ -222,11 +254,13 @@ The multi-provider support above exists at the generation-script layer. The chec
 
 - `docs/architecture.md`: architecture, modules, and data flow
 - `docs/artifacts_guide.md`: what each results artifact contains and how to read it
+- `docs/REVIEWER_WORKFLOW.md`: step-by-step artifact review order and source-of-truth guidance
 - `docs/results_interpretation.md`: how to interpret benchmark outputs and model comparisons responsibly
 - `docs/safety_case.md`: safety framing, hazards, and mitigations
 - `docs/failure_modes.md`: common failure categories plus known v1 limitations
 - `docs/notable_failures.md`: representative flagged cases
 - `docs/reviewer_guide.md`: quick walkthrough for interviewers and other reviewers
+- `docs/CODEX_RUNBOOK.md`: repo-local operating workflow for future Codex sessions
 - `docs/maintenance_boundaries.md`: what should not be edited casually because it can change benchmark meaning
 
 ## Eval-Sensitive Areas
