@@ -4,4 +4,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 sandbox_results/
+reviewer_packages/
 results/reviewer_report.html
+results/reviewer_summary.json
+results/reviewer_package/

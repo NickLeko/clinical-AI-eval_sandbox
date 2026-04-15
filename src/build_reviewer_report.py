@@ -1,8 +1,11 @@
 import argparse
 import csv
+import hashlib
 import html as html_lib
 import json
-from collections import Counter
+import os
+import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,9 +15,25 @@ if __package__ in (None, ""):
 
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.artifact_paths import build_artifact_paths
+from src.artifact_paths import (
+    EVALUATION_OUTPUT_FILENAME,
+    FLAGGED_OUTPUT_FILENAME,
+    PUBLIC_RAW_FILENAME,
+    RUN_MANIFEST_FILENAME,
+    SUMMARY_OUTPUT_FILENAME,
+    build_artifact_paths,
+)
 
 
+REVIEWER_PACKAGE_SCHEMA_VERSION = "reviewer-package-v1"
+REVIEWER_REPORT_FILENAME = "reviewer_report.html"
+REVIEWER_SUMMARY_FILENAME = "reviewer_summary.json"
+REVIEWER_PACKAGES_DIRNAME = "reviewer_packages"
+DERIVED_NOTICE = (
+    "Derived non-canonical reviewer package. This package is a convenience view built from completed-run "
+    "artifacts. It does not rescore cases, change prompts, change datasets, change thresholds, or replace "
+    "the canonical artifact sources of truth."
+)
 EVALUATION_REQUIRED_COLUMNS = {
     "case_id",
     "run_id",
@@ -39,6 +58,8 @@ FLAGGED_REQUIRED_FIELDS = {
 MANIFEST_REQUIRED_FIELDS = {"run_id", "provider", "model_id", "prompt_version"}
 OVERLAP_FIELDS = ["model_id", "prompt_version", "overall_grade", "failure_tags"]
 GRADE_ORDER = ["PASS", "WARN", "FAIL"]
+GRADE_PRIORITY = {"FAIL": 0, "WARN": 1, "PASS": 2}
+RISK_PRIORITY = {"high": 0, "medium": 1, "low": 2}
 SCORE_FIELDS = [
     "format_compliance",
     "citation_validity",
@@ -57,12 +78,77 @@ FLAG_FIELDS = [
 
 
 @dataclass(frozen=True)
+class SourceArtifactSpec:
+    artifact_id: str
+    filename: str
+    path_attr: str
+    role: str
+    used_for: tuple[str, ...]
+    parsed: bool
+    required: bool = True
+
+
+@dataclass(frozen=True)
 class ReviewerReportData:
+    results_dir: Path
     manifest: dict[str, Any]
     evaluation_rows: list[dict[str, str]]
     flagged_cases: list[dict[str, Any]]
+    all_cases: list[dict[str, Any]]
     grade_counts: Counter[str]
     failure_tag_counts: Counter[str]
+    source_artifacts: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ReviewerPackagePaths:
+    package_dir: Path
+    html_path: Path
+    json_path: Path
+
+
+SOURCE_ARTIFACT_SPECS = (
+    SourceArtifactSpec(
+        artifact_id="run_manifest",
+        filename=RUN_MANIFEST_FILENAME,
+        path_attr="run_manifest_path",
+        role="Run identity, dataset coverage, cache/live generation provenance, and case order.",
+        used_for=("run metadata", "identity validation", "canonical source links"),
+        parsed=True,
+    ),
+    SourceArtifactSpec(
+        artifact_id="evaluation_output",
+        filename=EVALUATION_OUTPUT_FILENAME,
+        path_attr="evaluation_output_path",
+        role="Full case-level structured scores, flags, tags, grades, and run metadata per row.",
+        used_for=("headline counts", "score summaries", "case index", "flagged-case validation"),
+        parsed=True,
+    ),
+    SourceArtifactSpec(
+        artifact_id="flagged_cases",
+        filename=FLAGGED_OUTPUT_FILENAME,
+        path_attr="flagged_output_path",
+        role="WARN/FAIL subset with question, context, gold key points, answer text, grade, and tags.",
+        used_for=("review-first cases", "flagged-case detail sections", "overlap validation"),
+        parsed=True,
+    ),
+    SourceArtifactSpec(
+        artifact_id="summary",
+        filename=SUMMARY_OUTPUT_FILENAME,
+        path_attr="summary_output_path",
+        role="Canonical markdown summary for reviewer orientation and cross-checking.",
+        used_for=("canonical source link", "human cross-check reference"),
+        parsed=False,
+    ),
+    SourceArtifactSpec(
+        artifact_id="raw_generations",
+        filename=PUBLIC_RAW_FILENAME,
+        path_attr="public_raw_path",
+        role="Raw prompts, model answers, response payloads, and generation metadata for audit.",
+        used_for=("canonical source link", "prompt and answer audit reference"),
+        parsed=False,
+    ),
+)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -169,6 +255,136 @@ def validate_evaluation_rows(manifest: dict[str, Any], rows: list[dict[str, str]
         )
 
 
+def ensure_required_source_artifacts(results_dir: str | Path) -> None:
+    paths = build_artifact_paths(str(results_dir))
+    missing: list[Path] = []
+    for spec in SOURCE_ARTIFACT_SPECS:
+        path = getattr(paths, spec.path_attr)
+        if spec.required and not path.exists():
+            missing.append(path)
+
+    if missing:
+        missing_paths = ", ".join(str(path) for path in missing)
+        raise FileNotFoundError(
+            "Missing required source artifact(s) for reviewer package: "
+            f"{missing_paths}. A completed run package requires "
+            f"{RUN_MANIFEST_FILENAME}, {EVALUATION_OUTPUT_FILENAME}, {FLAGGED_OUTPUT_FILENAME}, "
+            f"{SUMMARY_OUTPUT_FILENAME}, and {PUBLIC_RAW_FILENAME}."
+        )
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def display_path(path: Path) -> str:
+    return str(path).replace(os.sep, "/")
+
+
+def relative_link(from_dir: Path, target: Path) -> str:
+    return Path(os.path.relpath(target, start=from_dir)).as_posix()
+
+
+def build_source_artifacts(results_dir: Path) -> list[dict[str, Any]]:
+    paths = build_artifact_paths(str(results_dir))
+    artifacts: list[dict[str, Any]] = []
+    for spec in SOURCE_ARTIFACT_SPECS:
+        path = getattr(paths, spec.path_attr)
+        present = path.exists()
+        artifacts.append(
+            {
+                "artifact_id": spec.artifact_id,
+                "filename": spec.filename,
+                "source_path": display_path(path),
+                "role": spec.role,
+                "used_for": list(spec.used_for),
+                "required": spec.required,
+                "parsed": spec.parsed,
+                "present": present,
+                "bytes": path.stat().st_size if present else None,
+                "sha256": sha256_file(path) if present else None,
+            }
+        )
+    return artifacts
+
+
+def parse_float(value: Any) -> float | None:
+    try:
+        if value is None or str(value).strip() == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_bool_string(value: Any) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def slugify(value: Any) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip())
+    slug = slug.strip("-._")
+    return slug or "unknown"
+
+
+def case_anchor(case_id: Any) -> str:
+    return f"case-{slugify(case_id)}"
+
+
+def lowest_metric(scores: dict[str, Any]) -> dict[str, Any] | None:
+    numeric_scores: list[tuple[float, str]] = []
+    for field in SCORE_FIELDS:
+        if field not in scores:
+            continue
+        value = parse_float(scores.get(field))
+        if value is not None:
+            numeric_scores.append((value, field))
+    if not numeric_scores:
+        return None
+
+    value, metric = sorted(numeric_scores, key=lambda item: (item[0], item[1]))[0]
+    return {"metric": metric, "value": round(value, 6)}
+
+
+def format_metric(metric: dict[str, Any] | None) -> str:
+    if not metric:
+        return ""
+    value = metric.get("value")
+    if isinstance(value, (int, float)):
+        return f"{metric.get('metric', '')}={value:.3f}"
+    return f"{metric.get('metric', '')}={value}"
+
+
+def build_priority_reason(case: dict[str, Any]) -> str:
+    parts = [f"grade={case.get('overall_grade', '')}"]
+    if case.get("risk_level"):
+        parts.append(f"risk={case.get('risk_level')}")
+    tags = case.get("failure_tags_list") or []
+    if tags:
+        parts.append(f"tags={', '.join(tags)}")
+    metric = lowest_metric(case.get("scores", {}))
+    if metric:
+        parts.append(f"lowest displayed metric {format_metric(metric)}")
+    return "; ".join(parts)
+
+
+def review_priority_key(case: dict[str, Any]) -> tuple[int, int, float, str]:
+    grade = str(case.get("overall_grade", "")).upper()
+    risk = str(case.get("risk_level", "")).lower()
+    metric = lowest_metric(case.get("scores", {}))
+    metric_value = float(metric["value"]) if metric else 1.0
+    return (
+        GRADE_PRIORITY.get(grade, 99),
+        RISK_PRIORITY.get(risk, 99),
+        metric_value,
+        str(case.get("case_id", "")),
+    )
+
+
 def build_flagged_cases(
     evaluation_rows: list[dict[str, str]], flagged_rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -204,15 +420,27 @@ def build_flagged_cases(
         if grade not in {"WARN", "FAIL"}:
             raise ValueError(f"flagged_cases.jsonl row {case_id} has non-flagged grade: {grade}")
 
+        scores = {
+            field: evaluation.get(field, flagged.get(field, ""))
+            for field in SCORE_FIELDS
+            if field in evaluation or field in flagged
+        }
+        flags = {field: evaluation.get(field, "") for field in FLAG_FIELDS if field in evaluation}
+        failure_tags_list = parse_failure_tags(flagged.get("failure_tags", ""))
         flagged_cases.append(
             {
                 "case_id": case_id,
+                "detail_anchor": case_anchor(case_id),
                 "run_id": evaluation.get("run_id", ""),
                 "provider": evaluation.get("provider", ""),
                 "model_id": flagged.get("model_id", ""),
                 "prompt_version": flagged.get("prompt_version", ""),
+                "source_run_id": evaluation.get("source_run_id", ""),
+                "generation_mode": evaluation.get("generation_mode", ""),
+                "timestamp_utc": evaluation.get("timestamp_utc", ""),
                 "overall_grade": flagged.get("overall_grade", ""),
                 "failure_tags": flagged.get("failure_tags", ""),
+                "failure_tags_list": failure_tags_list,
                 "category": evaluation.get("category", ""),
                 "risk_level": evaluation.get("risk_level", ""),
                 "expected_behavior": evaluation.get("expected_behavior", ""),
@@ -220,26 +448,113 @@ def build_flagged_cases(
                 "provided_context": flagged.get("provided_context", ""),
                 "gold_key_points": flagged.get("gold_key_points", ""),
                 "answer_text": flagged.get("answer_text", ""),
-                "scores": {
-                    field: evaluation.get(field, flagged.get(field, ""))
-                    for field in SCORE_FIELDS
-                    if field in evaluation or field in flagged
+                "scores": scores,
+                "flags": flags,
+                "lowest_metric": lowest_metric(scores),
+                "source_provenance": {
+                    "run_manifest.json": [
+                        "run_id",
+                        "provider",
+                        "model_id",
+                        "prompt_version",
+                        "dataset_sha256",
+                        "case_ids",
+                    ],
+                    "evaluation_output.csv": [
+                        "run_id",
+                        "provider",
+                        "category",
+                        "risk_level",
+                        "expected_behavior",
+                        "overall_grade",
+                        "failure_tags",
+                        "metric scores",
+                        "boolean flags",
+                    ],
+                    "flagged_cases.jsonl": [
+                        "question",
+                        "provided_context",
+                        "gold_key_points",
+                        "answer_text",
+                        "overall_grade",
+                        "failure_tags",
+                    ],
                 },
-                "flags": {field: evaluation.get(field, "") for field in FLAG_FIELDS if field in evaluation},
             }
         )
 
-    return flagged_cases
+    ordered_cases: list[dict[str, Any]] = []
+    for review_rank, case in enumerate(sorted(flagged_cases, key=review_priority_key), start=1):
+        enriched = dict(case)
+        enriched["review_rank"] = review_rank
+        enriched["review_priority_reason"] = build_priority_reason(enriched)
+        ordered_cases.append(enriched)
+    return ordered_cases
+
+
+def build_all_cases(
+    evaluation_rows: list[dict[str, str]], flagged_cases: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    flagged_by_case = {case["case_id"]: case for case in flagged_cases}
+    all_cases: list[dict[str, Any]] = []
+    for row in evaluation_rows:
+        case_id = row.get("case_id", "")
+        scores = {field: row.get(field, "") for field in SCORE_FIELDS if field in row}
+        flags = {field: row.get(field, "") for field in FLAG_FIELDS if field in row}
+        flagged = flagged_by_case.get(case_id)
+        all_cases.append(
+            {
+                "case_id": case_id,
+                "detail_anchor": flagged.get("detail_anchor") if flagged else None,
+                "run_id": row.get("run_id", ""),
+                "provider": row.get("provider", ""),
+                "model_id": row.get("model_id", ""),
+                "prompt_version": row.get("prompt_version", ""),
+                "source_run_id": row.get("source_run_id", ""),
+                "generation_mode": row.get("generation_mode", ""),
+                "timestamp_utc": row.get("timestamp_utc", ""),
+                "category": row.get("category", ""),
+                "risk_level": row.get("risk_level", ""),
+                "expected_behavior": row.get("expected_behavior", ""),
+                "overall_grade": row.get("overall_grade", ""),
+                "failure_tags": row.get("failure_tags", ""),
+                "failure_tags_list": parse_failure_tags(row.get("failure_tags", "")),
+                "scores": scores,
+                "flags": flags,
+                "lowest_metric": lowest_metric(scores),
+                "has_flagged_detail": flagged is not None,
+                "source_provenance": {
+                    "evaluation_output.csv": [
+                        "case_id",
+                        "run_id",
+                        "provider",
+                        "model_id",
+                        "prompt_version",
+                        "category",
+                        "risk_level",
+                        "expected_behavior",
+                        "overall_grade",
+                        "failure_tags",
+                        "metric scores",
+                        "boolean flags",
+                    ]
+                },
+            }
+        )
+    return all_cases
 
 
 def load_report_data(results_dir: str = "results") -> ReviewerReportData:
-    paths = build_artifact_paths(results_dir)
+    results_path = Path(results_dir)
+    ensure_required_source_artifacts(results_path)
+    paths = build_artifact_paths(str(results_path))
     manifest = load_json(paths.run_manifest_path)
     evaluation_rows = load_evaluation_rows(paths.evaluation_output_path)
     flagged_rows = load_flagged_rows(paths.flagged_output_path)
 
     validate_evaluation_rows(manifest, evaluation_rows)
     flagged_cases = build_flagged_cases(evaluation_rows, flagged_rows)
+    all_cases = build_all_cases(evaluation_rows, flagged_cases)
 
     grade_counts: Counter[str] = Counter(row.get("overall_grade", "") or "(blank)" for row in evaluation_rows)
     failure_tag_counts: Counter[str] = Counter(
@@ -247,12 +562,201 @@ def load_report_data(results_dir: str = "results") -> ReviewerReportData:
     )
 
     return ReviewerReportData(
+        results_dir=results_path,
         manifest=manifest,
         evaluation_rows=evaluation_rows,
         flagged_cases=flagged_cases,
+        all_cases=all_cases,
         grade_counts=grade_counts,
         failure_tag_counts=failure_tag_counts,
+        source_artifacts=build_source_artifacts(results_path),
     )
+
+
+def ordered_grades(grade_counts: Counter[str]) -> list[str]:
+    extras = sorted(grade for grade in grade_counts if grade not in GRADE_ORDER)
+    return GRADE_ORDER + extras
+
+
+def build_grade_distribution(grade_counts: Counter[str], total: int) -> list[dict[str, Any]]:
+    distribution = []
+    for grade in ordered_grades(grade_counts):
+        count = grade_counts.get(grade, 0)
+        distribution.append(
+            {
+                "grade": grade,
+                "count": count,
+                "share": round((count / total) if total else 0.0, 6),
+            }
+        )
+    return distribution
+
+
+def build_metric_summary(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for field in SCORE_FIELDS:
+        values = [value for row in rows if (value := parse_float(row.get(field))) is not None]
+        if not values:
+            continue
+        summaries.append(
+            {
+                "metric": field,
+                "count": len(values),
+                "mean": round(sum(values) / len(values), 6),
+                "min": round(min(values), 6),
+                "max": round(max(values), 6),
+            }
+        )
+    return summaries
+
+
+def build_flag_counts(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    total = len(rows)
+    counts: list[dict[str, Any]] = []
+    for field in FLAG_FIELDS:
+        if not any(field in row for row in rows):
+            continue
+        true_count = sum(1 for row in rows if parse_bool_string(row.get(field, "")))
+        counts.append(
+            {
+                "flag": field,
+                "true_count": true_count,
+                "share": round((true_count / total) if total else 0.0, 6),
+            }
+        )
+    return counts
+
+
+def build_breakdown(rows: list[dict[str, str]], field: str, grades: list[str]) -> list[dict[str, Any]]:
+    counters: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in rows:
+        value = row.get(field, "") or "(blank)"
+        counters[value][row.get("overall_grade", "") or "(blank)"] += 1
+
+    breakdown = []
+    for value in sorted(counters):
+        grade_counts = counters[value]
+        total = sum(grade_counts.values())
+        breakdown.append(
+            {
+                field: value,
+                "total": total,
+                "grades": {grade: grade_counts.get(grade, 0) for grade in grades},
+            }
+        )
+    return breakdown
+
+
+def build_failure_tag_counts(failure_tag_counts: Counter[str]) -> list[dict[str, Any]]:
+    return [
+        {"failure_tag": tag, "count": count}
+        for tag, count in sorted(failure_tag_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def enrich_source_artifacts_for_package(
+    source_artifacts: list[dict[str, Any]], package_dir: Path
+) -> list[dict[str, Any]]:
+    enriched = []
+    for artifact in source_artifacts:
+        source_path = Path(str(artifact["source_path"]))
+        item = dict(artifact)
+        item["relative_link_from_package"] = relative_link(package_dir, source_path) if item["present"] else None
+        enriched.append(item)
+    return enriched
+
+
+def build_reviewer_summary(data: ReviewerReportData, package_dir: Path) -> dict[str, Any]:
+    total_cases = len(data.evaluation_rows)
+    grades = ordered_grades(data.grade_counts)
+    flagged_count = len(data.flagged_cases)
+
+    review_first_cases = [
+        {
+            "rank": case.get("review_rank"),
+            "case_id": case.get("case_id"),
+            "detail_anchor": case.get("detail_anchor"),
+            "overall_grade": case.get("overall_grade"),
+            "category": case.get("category"),
+            "risk_level": case.get("risk_level"),
+            "expected_behavior": case.get("expected_behavior"),
+            "failure_tags": case.get("failure_tags_list", []),
+            "lowest_metric": case.get("lowest_metric"),
+            "priority_reason": case.get("review_priority_reason"),
+            "source_refs": ["evaluation_output.csv", "flagged_cases.jsonl"],
+        }
+        for case in data.flagged_cases
+    ]
+
+    run_identity = {
+        "provider": data.manifest.get("provider", ""),
+        "model_id": data.manifest.get("model_id", ""),
+        "run_id": data.manifest.get("run_id", ""),
+        "prompt_version": data.manifest.get("prompt_version", ""),
+        "run_kind": data.manifest.get("run_kind", ""),
+        "benchmark_status": data.manifest.get("benchmark_status", ""),
+        "case_count": data.manifest.get("case_count", total_cases),
+        "dataset_total_rows": data.manifest.get("dataset_total_rows", ""),
+        "is_full_dataset_run": data.manifest.get("is_full_dataset_run", ""),
+        "dataset_path": data.manifest.get("dataset_path", ""),
+        "dataset_sha256": data.manifest.get("dataset_sha256", ""),
+        "generation_modes": data.manifest.get("generation_modes", {}),
+        "source_run_ids": data.manifest.get("source_run_ids", []),
+        "cache_hits": data.manifest.get("cache_hits", ""),
+        "live_generations": data.manifest.get("live_generations", ""),
+    }
+
+    return {
+        "package": {
+            "schema_version": REVIEWER_PACKAGE_SCHEMA_VERSION,
+            "derived_non_canonical": True,
+            "disclaimer": DERIVED_NOTICE,
+            "source_run_directory": display_path(data.results_dir),
+            "html_report": REVIEWER_REPORT_FILENAME,
+            "json_summary": REVIEWER_SUMMARY_FILENAME,
+        },
+        "validation": {
+            "status": "passed",
+            "checks": [
+                "Required completed-run source artifacts are present.",
+                "evaluation_output.csv run identity matches run_manifest.json.",
+                "evaluation_output.csv case order/content matches run_manifest.json when manifest case_ids are present.",
+                "flagged_cases.jsonl case IDs are a subset of evaluation_output.csv.",
+                "flagged_cases.jsonl overlap fields match evaluation_output.csv.",
+                "flagged_cases.jsonl contains only WARN/FAIL rows.",
+            ],
+            "non_canonical_boundary": (
+                "This package is read-only derived tooling. Canonical scoring and artifact semantics remain in the "
+                "source artifacts listed below."
+            ),
+        },
+        "source_artifacts": enrich_source_artifacts_for_package(data.source_artifacts, package_dir),
+        "run_identity": run_identity,
+        "headline_results": {
+            "total_cases": total_cases,
+            "flagged_cases": flagged_count,
+            "pass": data.grade_counts.get("PASS", 0),
+            "warn": data.grade_counts.get("WARN", 0),
+            "fail": data.grade_counts.get("FAIL", 0),
+            "cases_with_failure_tags": sum(1 for row in data.evaluation_rows if row.get("failure_tags", "").strip()),
+        },
+        "grade_distribution": build_grade_distribution(data.grade_counts, total_cases),
+        "metric_summary": build_metric_summary(data.evaluation_rows),
+        "boolean_flag_counts": build_flag_counts(data.evaluation_rows),
+        "category_breakdown": build_breakdown(data.evaluation_rows, "category", grades),
+        "risk_breakdown": build_breakdown(data.evaluation_rows, "risk_level", grades),
+        "failure_tag_counts": build_failure_tag_counts(data.failure_tag_counts),
+        "review_first_cases": review_first_cases,
+        "all_cases": data.all_cases,
+        "flagged_case_details": data.flagged_cases,
+        "canonical_source_guidance": {
+            "run_identity": RUN_MANIFEST_FILENAME,
+            "full_scored_table": EVALUATION_OUTPUT_FILENAME,
+            "flagged_case_text": FLAGGED_OUTPUT_FILENAME,
+            "top_level_markdown_summary": SUMMARY_OUTPUT_FILENAME,
+            "raw_prompt_answer_audit": PUBLIC_RAW_FILENAME,
+        },
+    }
 
 
 def esc(value: Any) -> str:
@@ -270,48 +774,11 @@ def display_value(value: Any) -> str:
 
 
 def render_definition_list(items: list[tuple[str, Any]]) -> str:
-    parts = ["<dl class=\"kv-list\">"]
+    parts = ['<dl class="kv-list">']
     for label, value in items:
         parts.append(f"<dt>{esc(label)}</dt><dd>{esc(display_value(value))}</dd>")
     parts.append("</dl>")
     return "".join(parts)
-
-
-def ordered_grades(grade_counts: Counter[str]) -> list[str]:
-    extras = sorted(grade for grade in grade_counts if grade not in GRADE_ORDER)
-    return GRADE_ORDER + extras
-
-
-def render_grade_distribution(data: ReviewerReportData) -> str:
-    total = len(data.evaluation_rows)
-    rows = []
-    for grade in ordered_grades(data.grade_counts):
-        count = data.grade_counts.get(grade, 0)
-        pct = (count / total * 100) if total else 0.0
-        rows.append(
-            f"<tr><th scope=\"row\">{esc(grade)}</th><td>{count}</td><td>{pct:.1f}%</td></tr>"
-        )
-
-    return (
-        "<table>"
-        "<thead><tr><th>Grade</th><th>Cases</th><th>Share</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
-
-
-def render_failure_tag_counts(data: ReviewerReportData) -> str:
-    if not data.failure_tag_counts:
-        return "<p class=\"muted\">No failure tags were present in evaluation_output.csv.</p>"
-
-    rows = []
-    for tag, count in sorted(data.failure_tag_counts.items(), key=lambda item: (-item[1], item[0])):
-        rows.append(f"<tr><th scope=\"row\">{esc(tag)}</th><td>{count}</td></tr>")
-
-    return (
-        "<table>"
-        "<thead><tr><th>Failure tag</th><th>Cases</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
 
 
 def grade_class(grade: Any) -> str:
@@ -321,145 +788,293 @@ def grade_class(grade: Any) -> str:
     return "other"
 
 
-def render_text_block(title: str, value: Any) -> str:
-    return f"<section class=\"text-block\"><h4>{esc(title)}</h4><pre>{esc(display_value(value))}</pre></section>"
+def percent(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value * 100:.1f}%"
+    return ""
 
 
-def render_case_details(case: dict[str, Any], index: int) -> str:
-    overlap_items = [
-        ("Model ID", case.get("model_id", "")),
-        ("Prompt version", case.get("prompt_version", "")),
-        ("Overall grade", case.get("overall_grade", "")),
-        ("Failure tags", case.get("failure_tags", "")),
-    ]
-    context_items = [
-        ("Run ID", case.get("run_id", "")),
-        ("Provider", case.get("provider", "")),
-        ("Category", case.get("category", "")),
-        ("Risk level", case.get("risk_level", "")),
-        ("Expected behavior", case.get("expected_behavior", "")),
-    ]
-    score_items = [(field, value) for field, value in case.get("scores", {}).items()]
-    flag_items = [(field, value) for field, value in case.get("flags", {}).items()]
+def number(value: Any, digits: int = 3) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.{digits}f}"
+    return esc(value)
 
-    blocks = [
-        render_text_block("Question", case.get("question", "")),
-        render_text_block("Provided Context", case.get("provided_context", "")),
-        render_text_block("Gold Key Points", case.get("gold_key_points", "")),
-        render_text_block("Model Answer", case.get("answer_text", "")),
-    ]
 
+def render_source_artifacts(summary: dict[str, Any]) -> str:
+    rows = []
+    for artifact in summary["source_artifacts"]:
+        link = artifact.get("relative_link_from_package") or artifact.get("source_path", "")
+        sha = str(artifact.get("sha256") or "")
+        parsed = "parsed" if artifact.get("parsed") else "linked"
+        rows.append(
+            "<tr>"
+            f"<th scope=\"row\"><a href=\"{esc(link)}\">{esc(artifact.get('filename', ''))}</a></th>"
+            f"<td>{esc(artifact.get('role', ''))}</td>"
+            f"<td>{esc(parsed)}</td>"
+            f"<td>{esc(artifact.get('bytes', ''))}</td>"
+            f"<td><code>{esc(sha[:12])}</code></td>"
+            "</tr>"
+        )
     return (
-        f"<article class=\"case-detail\" id=\"case-detail-{index}\">"
-        f"<h3>{esc(case.get('case_id', ''))}</h3>"
-        "<div class=\"detail-grid\">"
-        "<section><h4>Validated Artifact Overlap</h4>"
-        f"{render_definition_list(overlap_items)}</section>"
-        "<section><h4>Run And Case Context</h4>"
-        f"{render_definition_list(context_items)}</section>"
-        "<section><h4>Metric Scores</h4>"
-        f"{render_definition_list(score_items)}</section>"
-        "<section><h4>Boolean Flags</h4>"
-        f"{render_definition_list(flag_items)}</section>"
-        "</div>"
-        f"{''.join(blocks)}"
-        "</article>"
+        "<table>"
+        "<thead><tr><th>Artifact</th><th>Reviewer-package role</th><th>Use</th><th>Bytes</th>"
+        "<th>SHA-256 prefix</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
 
-def render_flagged_cases(data: ReviewerReportData) -> str:
-    if not data.flagged_cases:
-        return "<p class=\"muted\">No WARN or FAIL cases were present in flagged_cases.jsonl.</p>"
+def render_headline_cards(summary: dict[str, Any]) -> str:
+    headline = summary["headline_results"]
+    cards = [
+        ("Total cases", headline.get("total_cases", 0)),
+        ("Flagged cases", headline.get("flagged_cases", 0)),
+        ("PASS", headline.get("pass", 0)),
+        ("WARN", headline.get("warn", 0)),
+        ("FAIL", headline.get("fail", 0)),
+        ("Cases with tags", headline.get("cases_with_failure_tags", 0)),
+    ]
+    return '<div class="stats">' + "".join(
+        f"<div class=\"stat\"><span>{esc(label)}</span><strong>{esc(value)}</strong></div>" for label, value in cards
+    ) + "</div>"
 
-    table_rows = []
-    detail_panels = []
-    for index, case in enumerate(data.flagged_cases):
-        filter_text = " ".join(
-            str(case.get(field, ""))
-            for field in [
-                "case_id",
-                "overall_grade",
-                "failure_tags",
-                "category",
-                "risk_level",
-                "question",
-                "expected_behavior",
-            ]
+
+def render_grade_distribution(summary: dict[str, Any]) -> str:
+    rows = [
+        f"<tr><th scope=\"row\"><span class=\"badge {grade_class(item['grade'])}\">{esc(item['grade'])}</span></th>"
+        f"<td>{item['count']}</td><td>{percent(item['share'])}</td></tr>"
+        for item in summary["grade_distribution"]
+    ]
+    return (
+        "<table><thead><tr><th>Grade</th><th>Cases</th><th>Share</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_metric_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    for item in summary["metric_summary"]:
+        rows.append(
+            "<tr>"
+            f"<th scope=\"row\"><code>{esc(item['metric'])}</code></th>"
+            f"<td>{number(item.get('mean'))}</td>"
+            f"<td>{number(item.get('min'))}</td>"
+            f"<td>{number(item.get('max'))}</td>"
+            f"<td>{esc(item.get('count', ''))}</td>"
+            "</tr>"
         )
-        grade = case.get("overall_grade", "")
-        table_rows.append(
-            "<tr class=\"case-row\" tabindex=\"0\" "
-            f"data-target=\"case-detail-{index}\" "
-            f"data-grade=\"{esc(grade)}\" "
-            f"data-filter-text=\"{esc(filter_text.lower())}\">"
-            f"<td><button type=\"button\" class=\"case-button\" data-target=\"case-detail-{index}\">"
-            f"{esc(case.get('case_id', ''))}</button></td>"
-            f"<td><span class=\"badge {grade_class(grade)}\">{esc(grade)}</span></td>"
-            f"<td>{esc(case.get('failure_tags', ''))}</td>"
+    return (
+        "<table><thead><tr><th>Metric</th><th>Mean</th><th>Min</th><th>Max</th><th>Rows</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_boolean_flag_counts(summary: dict[str, Any]) -> str:
+    rows = []
+    for item in summary["boolean_flag_counts"]:
+        rows.append(
+            "<tr>"
+            f"<th scope=\"row\"><code>{esc(item['flag'])}</code></th>"
+            f"<td>{esc(item.get('true_count', 0))}</td>"
+            f"<td>{percent(item.get('share'))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        return '<p class="muted">No boolean flag columns were available in evaluation_output.csv.</p>'
+    return (
+        "<table><thead><tr><th>Flag</th><th>True count</th><th>Share</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_breakdown_table(rows_data: list[dict[str, Any]], value_key: str, grades: list[str]) -> str:
+    header = "".join(f"<th>{esc(grade)}</th>" for grade in grades)
+    rows = []
+    for item in rows_data:
+        grade_cells = "".join(f"<td>{esc(item.get('grades', {}).get(grade, 0))}</td>" for grade in grades)
+        rows.append(
+            "<tr>"
+            f"<th scope=\"row\">{esc(item.get(value_key, ''))}</th>"
+            f"<td>{esc(item.get('total', 0))}</td>"
+            f"{grade_cells}</tr>"
+        )
+    return (
+        f"<table><thead><tr><th>{esc(value_key)}</th><th>Total</th>{header}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_failure_tag_counts(summary: dict[str, Any]) -> str:
+    if not summary["failure_tag_counts"]:
+        return '<p class="muted">No failure tags were present in evaluation_output.csv.</p>'
+    rows = [
+        f"<tr><th scope=\"row\"><code>{esc(item['failure_tag'])}</code></th><td>{esc(item['count'])}</td></tr>"
+        for item in summary["failure_tag_counts"]
+    ]
+    return (
+        "<table><thead><tr><th>Failure tag</th><th>Cases</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_review_first(summary: dict[str, Any]) -> str:
+    cases = summary["review_first_cases"]
+    if not cases:
+        return '<p class="muted">No WARN or FAIL cases were present in flagged_cases.jsonl.</p>'
+
+    rows = []
+    for case in cases:
+        metric = format_metric(case.get("lowest_metric"))
+        tags = ", ".join(case.get("failure_tags") or [])
+        rows.append(
+            "<tr>"
+            f"<td>{esc(case.get('rank', ''))}</td>"
+            f"<th scope=\"row\"><a href=\"#{esc(case.get('detail_anchor', ''))}\">{esc(case.get('case_id', ''))}</a></th>"
+            f"<td><span class=\"badge {grade_class(case.get('overall_grade'))}\">{esc(case.get('overall_grade', ''))}</span></td>"
+            f"<td>{esc(case.get('category', ''))}</td>"
+            f"<td>{esc(case.get('risk_level', ''))}</td>"
+            f"<td>{esc(tags)}</td>"
+            f"<td>{esc(metric)}</td>"
+            f"<td>{esc(case.get('priority_reason', ''))}</td>"
+            "</tr>"
+        )
+    return (
+        '<p class="muted">Review order is a convenience heuristic using only existing grade, risk, tag, and metric '
+        "fields. It is not a new benchmark score.</p>"
+        "<table><thead><tr><th>Rank</th><th>Case</th><th>Grade</th><th>Category</th><th>Risk</th>"
+        "<th>Failure tags</th><th>Lowest displayed metric</th><th>Reason</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_case_index(summary: dict[str, Any]) -> str:
+    rows = []
+    for case in summary["all_cases"]:
+        case_id = esc(case.get("case_id", ""))
+        if case.get("detail_anchor"):
+            case_link = f"<a href=\"#{esc(case.get('detail_anchor'))}\">{case_id}</a>"
+        else:
+            case_link = case_id
+        rows.append(
+            "<tr>"
+            f"<th scope=\"row\">{case_link}</th>"
+            f"<td><span class=\"badge {grade_class(case.get('overall_grade'))}\">{esc(case.get('overall_grade', ''))}</span></td>"
             f"<td>{esc(case.get('category', ''))}</td>"
             f"<td>{esc(case.get('risk_level', ''))}</td>"
             f"<td>{esc(case.get('expected_behavior', ''))}</td>"
+            f"<td>{esc(', '.join(case.get('failure_tags_list') or []))}</td>"
+            f"<td>{esc(format_metric(case.get('lowest_metric')))}</td>"
+            f"<td>{'yes' if case.get('has_flagged_detail') else 'no'}</td>"
             "</tr>"
         )
-        detail_panels.append(render_case_details(case, index))
-
     return (
-        "<div class=\"filters\">"
-        "<label for=\"case-filter\">Filter cases</label>"
-        "<input id=\"case-filter\" type=\"search\" placeholder=\"case id, tag, grade, category, question\">"
-        "<label for=\"grade-filter\">Grade</label>"
-        "<select id=\"grade-filter\"><option value=\"\">All grades</option>"
-        "<option value=\"WARN\">WARN</option><option value=\"FAIL\">FAIL</option></select>"
-        "<span id=\"visible-count\" class=\"muted\"></span>"
-        "</div>"
-        "<div class=\"review-grid\">"
-        "<div class=\"table-wrap\">"
-        "<table class=\"flagged-table\">"
-        "<thead><tr><th>Case</th><th>Grade</th><th>Failure tags</th><th>Category</th><th>Risk</th>"
-        "<th>Expected behavior</th></tr></thead>"
-        f"<tbody>{''.join(table_rows)}</tbody>"
-        "</table>"
-        "</div>"
-        f"<div class=\"detail-wrap\">{''.join(detail_panels)}</div>"
-        "</div>"
+        "<table><thead><tr><th>Case</th><th>Grade</th><th>Category</th><th>Risk</th>"
+        "<th>Expected behavior</th><th>Failure tags</th><th>Lowest displayed metric</th>"
+        "<th>Flagged detail</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
 
-def render_report_html(data: ReviewerReportData) -> str:
-    manifest = data.manifest
-    total_cases = len(data.evaluation_rows)
-    flagged_count = len(data.flagged_cases)
-    run_title = f"{manifest.get('provider', '')} / {manifest.get('model_id', '')} / {manifest.get('run_id', '')}"
+def render_scores_or_flags(items: dict[str, Any], label: str) -> str:
+    if not items:
+        return f'<p class="muted">No {esc(label)} fields were available.</p>'
+    return render_definition_list([(field, value) for field, value in items.items()])
+
+
+def render_text_block(title: str, value: Any) -> str:
+    return f'<section class="text-block"><h4>{esc(title)}</h4><pre>{esc(display_value(value))}</pre></section>'
+
+
+def render_flagged_case_details(summary: dict[str, Any]) -> str:
+    cases = summary["flagged_case_details"]
+    if not cases:
+        return '<p class="muted">No flagged case detail sections were generated.</p>'
+
+    panels = []
+    for case in cases:
+        overlap_items = [
+            ("Review rank", case.get("review_rank", "")),
+            ("Model ID", case.get("model_id", "")),
+            ("Prompt version", case.get("prompt_version", "")),
+            ("Overall grade", case.get("overall_grade", "")),
+            ("Failure tags", case.get("failure_tags", "")),
+        ]
+        context_items = [
+            ("Run ID", case.get("run_id", "")),
+            ("Provider", case.get("provider", "")),
+            ("Source run ID", case.get("source_run_id", "")),
+            ("Generation mode", case.get("generation_mode", "")),
+            ("Category", case.get("category", "")),
+            ("Risk level", case.get("risk_level", "")),
+            ("Expected behavior", case.get("expected_behavior", "")),
+        ]
+        blocks = [
+            render_text_block("Question", case.get("question", "")),
+            render_text_block("Provided Context", case.get("provided_context", "")),
+            render_text_block("Gold Key Points", case.get("gold_key_points", "")),
+            render_text_block("Model Answer", case.get("answer_text", "")),
+        ]
+        panels.append(
+            f"<article class=\"case-detail\" id=\"{esc(case.get('detail_anchor', ''))}\">"
+            f"<h3>{esc(case.get('case_id', ''))}</h3>"
+            '<p class="muted">Case detail is assembled from flagged_cases.jsonl plus validated '
+            "evaluation_output.csv overlap fields. Source provenance is listed in reviewer_summary.json.</p>"
+            '<div class="detail-grid">'
+            "<section><h4>Validated Artifact Overlap</h4>"
+            f"{render_definition_list(overlap_items)}</section>"
+            "<section><h4>Run And Case Context</h4>"
+            f"{render_definition_list(context_items)}</section>"
+            "<section><h4>Metric Scores</h4>"
+            f"{render_scores_or_flags(case.get('scores', {}), 'score')}</section>"
+            "<section><h4>Boolean Flags</h4>"
+            f"{render_scores_or_flags(case.get('flags', {}), 'flag')}</section>"
+            "</div>"
+            f"{''.join(blocks)}"
+            '<p><a href="#review-first">Back to review-first list</a></p>'
+            "</article>"
+        )
+    return "".join(panels)
+
+
+def render_report_html(summary: dict[str, Any]) -> str:
+    run_identity = summary["run_identity"]
+    grades = [item["grade"] for item in summary["grade_distribution"]]
+    run_title = (
+        f"{run_identity.get('provider', '')} / {run_identity.get('model_id', '')} / "
+        f"{run_identity.get('run_id', '')}"
+    )
     summary_items = [
-        ("Provider", manifest.get("provider", "")),
-        ("Model", manifest.get("model_id", "")),
-        ("Run ID", manifest.get("run_id", "")),
-        ("Prompt version", manifest.get("prompt_version", "")),
-        ("Run kind", manifest.get("run_kind", "")),
-        ("Benchmark status", manifest.get("benchmark_status", "")),
-        ("Cases in run", manifest.get("case_count", total_cases)),
-        ("Dataset total rows", manifest.get("dataset_total_rows", "")),
-        ("Full dataset run", manifest.get("is_full_dataset_run", "")),
-        ("Dataset SHA-256", manifest.get("dataset_sha256", "")),
-        ("Generation modes", manifest.get("generation_modes", "")),
-        ("Source run IDs", manifest.get("source_run_ids", "")),
+        ("Provider", run_identity.get("provider", "")),
+        ("Model", run_identity.get("model_id", "")),
+        ("Run ID", run_identity.get("run_id", "")),
+        ("Prompt version", run_identity.get("prompt_version", "")),
+        ("Run kind", run_identity.get("run_kind", "")),
+        ("Benchmark status", run_identity.get("benchmark_status", "")),
+        ("Cases in run", run_identity.get("case_count", "")),
+        ("Dataset total rows", run_identity.get("dataset_total_rows", "")),
+        ("Full dataset run", run_identity.get("is_full_dataset_run", "")),
+        ("Dataset path", run_identity.get("dataset_path", "")),
+        ("Dataset SHA-256", run_identity.get("dataset_sha256", "")),
+        ("Generation modes", run_identity.get("generation_modes", "")),
+        ("Source run IDs", run_identity.get("source_run_ids", "")),
+        ("Cache hits", run_identity.get("cache_hits", "")),
+        ("Live generations", run_identity.get("live_generations", "")),
     ]
 
     css = """
 body {
   margin: 0;
-  background: #f6f6f6;
+  background: #f7f7f7;
   color: #202124;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.45;
 }
 header {
   background: #ffffff;
-  border-bottom: 1px solid #d9d9d9;
+  border-bottom: 1px solid #d8d8d8;
   padding: 24px;
 }
 main {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -469,22 +1084,50 @@ h1, h2, h3, h4 {
 p {
   margin: 0 0 12px;
 }
+a {
+  color: #174ea6;
+}
+.notice {
+  background: #fff7d1;
+  border: 1px solid #d6b84a;
+  border-radius: 6px;
+  margin-top: 14px;
+  padding: 12px;
+}
 .panel {
   background: #ffffff;
-  border: 1px solid #d9d9d9;
+  border: 1px solid #d8d8d8;
   border-radius: 6px;
   margin-bottom: 20px;
   padding: 18px;
 }
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+}
+.toc li {
+  list-style: none;
+}
+.toc a {
+  background: #f1f3f4;
+  border: 1px solid #d8d8d8;
+  border-radius: 6px;
+  display: inline-block;
+  padding: 6px 9px;
+  text-decoration: none;
+}
 .stats {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   margin-bottom: 20px;
 }
 .stat {
   background: #ffffff;
-  border: 1px solid #d9d9d9;
+  border: 1px solid #d8d8d8;
   border-radius: 6px;
   padding: 14px;
 }
@@ -509,9 +1152,17 @@ thead th {
   background: #eeeeee;
   font-weight: 700;
 }
+.table-wrap {
+  overflow-x: auto;
+}
+.two-col {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
 .kv-list {
   display: grid;
-  grid-template-columns: minmax(130px, 210px) 1fr;
+  grid-template-columns: minmax(130px, 230px) 1fr;
   gap: 6px 12px;
   margin: 0;
 }
@@ -541,57 +1192,15 @@ thead th {
 .badge.other {
   background: #e5e5e5;
 }
-.filters {
-  align-items: end;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.filters label {
-  font-weight: 700;
-}
-input, select, button {
-  border: 1px solid #b8b8b8;
-  border-radius: 6px;
-  font: inherit;
-  padding: 8px 10px;
-}
-button {
-  background: #ffffff;
-  cursor: pointer;
-}
-button:hover {
-  background: #eeeeee;
-}
-.review-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
-}
-.table-wrap {
-  overflow-x: auto;
-}
-.case-row {
-  cursor: pointer;
-}
-.case-row:hover,
-.case-row[aria-selected="true"] {
-  background: #f0f0f0;
-}
-.case-button {
-  width: 100%;
-}
 .case-detail {
-  display: none;
-}
-.case-detail.active {
-  display: block;
+  border-top: 3px solid #d8d8d8;
+  margin-top: 22px;
+  padding-top: 18px;
 }
 .detail-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 .text-block {
   margin-top: 14px;
@@ -605,92 +1214,28 @@ pre {
   padding: 12px;
   white-space: pre-wrap;
 }
-@media (max-width: 900px) {
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (max-width: 760px) {
   main {
     padding: 16px;
-  }
-  .review-grid {
-    grid-template-columns: 1fr;
   }
   .kv-list {
     grid-template-columns: 1fr;
   }
 }
-"""
-
-    js = """
-(function () {
-  const textFilter = document.getElementById("case-filter");
-  const gradeFilter = document.getElementById("grade-filter");
-  const visibleCount = document.getElementById("visible-count");
-  const rows = Array.from(document.querySelectorAll(".case-row"));
-  const details = Array.from(document.querySelectorAll(".case-detail"));
-
-  function showDetail(targetId) {
-    details.forEach((detail) => {
-      detail.classList.toggle("active", detail.id === targetId);
-    });
-    rows.forEach((row) => {
-      row.setAttribute("aria-selected", row.dataset.target === targetId ? "true" : "false");
-    });
+@media print {
+  body {
+    background: #ffffff;
   }
-
-  function visibleRows() {
-    return rows.filter((row) => row.style.display !== "none");
+  header, .panel, .stat {
+    border-color: #999999;
   }
-
-  function applyFilters() {
-    const query = (textFilter ? textFilter.value : "").trim().toLowerCase();
-    const grade = gradeFilter ? gradeFilter.value : "";
-    let count = 0;
-
-    rows.forEach((row) => {
-      const matchesText = !query || row.dataset.filterText.includes(query);
-      const matchesGrade = !grade || row.dataset.grade === grade;
-      const show = matchesText && matchesGrade;
-      row.style.display = show ? "" : "none";
-      if (show) {
-        count += 1;
-      }
-    });
-
-    if (visibleCount) {
-      visibleCount.textContent = count + " visible";
-    }
-
-    const active = document.querySelector(".case-detail.active");
-    const activeRow = active ? rows.find((row) => row.dataset.target === active.id) : null;
-    if (!activeRow || activeRow.style.display === "none") {
-      const firstVisible = visibleRows()[0];
-      if (firstVisible) {
-        showDetail(firstVisible.dataset.target);
-      } else {
-        details.forEach((detail) => detail.classList.remove("active"));
-      }
-    }
+  a {
+    color: #000000;
   }
-
-  rows.forEach((row) => {
-    row.addEventListener("click", () => showDetail(row.dataset.target));
-    row.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        showDetail(row.dataset.target);
-      }
-    });
-  });
-
-  if (textFilter) {
-    textFilter.addEventListener("input", applyFilters);
-  }
-  if (gradeFilter) {
-    gradeFilter.addEventListener("change", applyFilters);
-  }
-  if (rows.length) {
-    showDetail(rows[0].dataset.target);
-  }
-  applyFilters();
-})();
+}
 """
 
     return f"""<!doctype html>
@@ -698,65 +1243,178 @@ pre {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Clinical AI Evaluation Reviewer Report</title>
+  <title>Clinical AI Evaluation Reviewer Package</title>
   <style>{css}</style>
 </head>
 <body>
   <header>
-    <h1>Clinical AI Evaluation Reviewer Report</h1>
-    <p class="muted">Derived from run_manifest.json, evaluation_output.csv, and flagged_cases.jsonl. This report does not rescore cases or change canonical artifact meaning.</p>
+    <h1>Clinical AI Evaluation Reviewer Package</h1>
     <p><strong>{esc(run_title)}</strong></p>
+    <div class="notice"><strong>Derived / non-canonical:</strong> {esc(summary["package"]["disclaimer"])}</div>
+    <ul class="toc" aria-label="Table of contents">
+      <li><a href="#run">Run</a></li>
+      <li><a href="#sources">Sources</a></li>
+      <li><a href="#results">Results</a></li>
+      <li><a href="#failure-summary">Failure Summary</a></li>
+      <li><a href="#review-first">Review First</a></li>
+      <li><a href="#case-index">Case Index</a></li>
+      <li><a href="#flagged-details">Flagged Details</a></li>
+      <li><a href="#canonical">Canonical Sources</a></li>
+    </ul>
   </header>
   <main>
-    <div class="stats">
-      <div class="stat"><span>Total cases</span><strong>{total_cases}</strong></div>
-      <div class="stat"><span>Flagged cases</span><strong>{flagged_count}</strong></div>
-      <div class="stat"><span>WARN</span><strong>{data.grade_counts.get("WARN", 0)}</strong></div>
-      <div class="stat"><span>FAIL</span><strong>{data.grade_counts.get("FAIL", 0)}</strong></div>
-    </div>
-    <section class="panel">
+    {render_headline_cards(summary)}
+    <section class="panel" id="run">
       <h2>Run Summary</h2>
       {render_definition_list(summary_items)}
     </section>
-    <section class="panel">
-      <h2>Grade Distribution</h2>
-      {render_grade_distribution(data)}
+    <section class="panel" id="sources">
+      <h2>Source Artifacts</h2>
+      <p class="muted">The package validates and reads completed-run artifacts, then links back to the canonical files for audit.</p>
+      <div class="table-wrap">{render_source_artifacts(summary)}</div>
     </section>
-    <section class="panel">
-      <h2>Failure Tag Counts</h2>
-      {render_failure_tag_counts(data)}
+    <section class="panel" id="results">
+      <h2>Overall Results</h2>
+      <div class="two-col">
+        <section>
+          <h3>Grade Distribution</h3>
+          {render_grade_distribution(summary)}
+        </section>
+        <section>
+          <h3>Metric Score Summary</h3>
+          {render_metric_summary(summary)}
+        </section>
+      </div>
     </section>
-    <section class="panel">
-      <h2>Flagged Cases</h2>
-      {render_flagged_cases(data)}
+    <section class="panel" id="failure-summary">
+      <h2>Failure Categories And Flags</h2>
+      <div class="two-col">
+        <section>
+          <h3>Failure Tag Counts</h3>
+          {render_failure_tag_counts(summary)}
+        </section>
+        <section>
+          <h3>Boolean Flag Counts</h3>
+          {render_boolean_flag_counts(summary)}
+        </section>
+      </div>
+      <div class="two-col">
+        <section>
+          <h3>Category Breakdown</h3>
+          {render_breakdown_table(summary["category_breakdown"], "category", grades)}
+        </section>
+        <section>
+          <h3>Risk Breakdown</h3>
+          {render_breakdown_table(summary["risk_breakdown"], "risk_level", grades)}
+        </section>
+      </div>
+    </section>
+    <section class="panel" id="review-first">
+      <h2>Review First</h2>
+      <div class="table-wrap">{render_review_first(summary)}</div>
+    </section>
+    <section class="panel" id="case-index">
+      <h2>Full Case Index</h2>
+      <p class="muted">This index is derived from evaluation_output.csv. Only WARN/FAIL cases have answer/context detail sections because that text is supplied by flagged_cases.jsonl.</p>
+      <div class="table-wrap">{render_case_index(summary)}</div>
+    </section>
+    <section class="panel" id="flagged-details">
+      <h2>Flagged Case Details</h2>
+      {render_flagged_case_details(summary)}
+    </section>
+    <section class="panel" id="canonical">
+      <h2>Canonical Sources Of Truth</h2>
+      <p>Use this report to navigate. Use the source artifacts to adjudicate the run.</p>
+      {render_definition_list([
+        ("Run identity", summary["canonical_source_guidance"]["run_identity"]),
+        ("Full scored table", summary["canonical_source_guidance"]["full_scored_table"]),
+        ("Flagged case text", summary["canonical_source_guidance"]["flagged_case_text"]),
+        ("Markdown summary", summary["canonical_source_guidance"]["top_level_markdown_summary"]),
+        ("Raw prompt/answer audit", summary["canonical_source_guidance"]["raw_prompt_answer_audit"]),
+      ])}
     </section>
   </main>
-  <script>{js}</script>
 </body>
 </html>
 """
 
 
-def main(results_dir: str = "results", output_path: str | None = None) -> Path:
-    paths = build_artifact_paths(results_dir)
-    destination = Path(output_path) if output_path else paths.reviewer_report_path
-    data = load_report_data(results_dir)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(render_report_html(data), encoding="utf-8")
-    print(f"Wrote: {destination}")
-    return destination
+def render_summary_json(summary: dict[str, Any]) -> str:
+    return json.dumps(summary, indent=2, ensure_ascii=True) + "\n"
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Build a self-contained HTML reviewer report from published evaluation artifacts."
+def default_package_dir(results_dir: str | Path, manifest: dict[str, Any]) -> Path:
+    results_path = Path(results_dir)
+    identity = "_".join(
+        slugify(manifest.get(field, ""))
+        for field in ("provider", "model_id", "run_id")
+        if str(manifest.get(field, "")).strip()
     )
-    parser.add_argument("--results-dir", default="results", help="Directory containing published artifacts.")
+    identity = identity or "run"
+    return results_path.parent / REVIEWER_PACKAGES_DIRNAME / identity
+
+
+def write_reviewer_package(
+    results_dir: str = "results",
+    output_dir: str | None = None,
+    html_output_path: str | None = None,
+) -> ReviewerPackagePaths:
+    data = load_report_data(results_dir)
+    if html_output_path:
+        html_path = Path(html_output_path)
+        package_dir = html_path.parent
+    else:
+        package_dir = Path(output_dir) if output_dir else default_package_dir(results_dir, data.manifest)
+        html_path = package_dir / REVIEWER_REPORT_FILENAME
+    json_path = package_dir / REVIEWER_SUMMARY_FILENAME
+
+    summary = build_reviewer_summary(data, package_dir)
+    package_dir.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(render_summary_json(summary), encoding="utf-8")
+    html_path.write_text(render_report_html(summary), encoding="utf-8")
+    return ReviewerPackagePaths(package_dir=package_dir, html_path=html_path, json_path=json_path)
+
+
+def main(
+    results_dir: str = "results",
+    output_dir: str | None = None,
+    output_path: str | None = None,
+) -> ReviewerPackagePaths:
+    paths = write_reviewer_package(
+        results_dir=results_dir,
+        output_dir=output_dir,
+        html_output_path=output_path,
+    )
+    print("Wrote reviewer package:")
+    print(f"  HTML: {paths.html_path}")
+    print(f"  JSON: {paths.json_path}")
+    return paths
+
+
+def cli() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build a derived, non-canonical reviewer package from completed evaluation artifacts."
+    )
+    parser.add_argument("--results-dir", default="results", help="Directory containing completed-run artifacts.")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help=(
+            "Directory for reviewer_report.html and reviewer_summary.json. Defaults to a run-specific directory "
+            f"under {REVIEWER_PACKAGES_DIRNAME}/ beside --results-dir."
+        ),
+    )
     parser.add_argument(
         "--output",
         default=None,
-        help="HTML output path. Defaults to reviewer_report.html inside --results-dir.",
+        help=(
+            "Legacy/custom HTML output path. JSON is written beside it. Prefer --output-dir for reviewer packages."
+        ),
     )
     args = parser.parse_args()
 
-    main(results_dir=args.results_dir, output_path=args.output)
+    main(results_dir=args.results_dir, output_dir=args.output_dir, output_path=args.output)
+
+
+if __name__ == "__main__":
+    cli()

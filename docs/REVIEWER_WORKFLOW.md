@@ -10,7 +10,8 @@ Use this workflow to inspect one run without confusing canonical artifacts, deri
 | `results/evaluation_output.csv` | Inspect the full scored case table. | Case-level metric values, boolean safety flags, failure tags, PASS/WARN/FAIL grades, run metadata per row. | Raw prompts/answers, clinician adjudication, or proof of clinical safety. |
 | `results/flagged_cases.jsonl` | Review WARN/FAIL examples quickly. | The flagged subset plus question, provided context, gold key points, answer text, grade, and failure tags for those cases. | The full benchmark population, absence of risk in non-flagged cases, or aggregate rates. |
 | `results/summary.md` | Get the fastest top-level snapshot. | Headline distribution, rates, means, failure tag counts, and worst-case table for the artifact set. | Detailed case evidence or replacement for `evaluation_output.csv` and flagged-case review. |
-| `results/reviewer_report.html` | Use a browser-friendly local view of the manifest, distributions, tags, and flagged cases. | Nothing canonical; it is a derived convenience view generated from the three published artifacts. | Scoring logic, artifact meaning, or source-of-truth results. |
+| `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_report.html` | Use a browser-friendly local view of the manifest, distributions, tags, flags, review-first cases, and flagged details. | Nothing canonical; it is a derived convenience view generated from completed-run artifacts. | Scoring logic, artifact meaning, or source-of-truth results. |
+| `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_summary.json` | Use a machine-readable mirror of the HTML reviewer-package sections for future tooling. | Nothing canonical; it is derived from the same completed-run artifacts as the HTML. | Scoring logic, artifact meaning, or source-of-truth results. |
 | `results/raw_generations.jsonl` | Audit the exact model inputs and outputs when needed. | Raw prompt text, answer text, provider response payload, and generation metadata for the published run. | Scored grades or aggregate benchmark interpretation. |
 
 ## Recommended Review Order
@@ -23,31 +24,42 @@ Use this workflow to inspect one run without confusing canonical artifacts, deri
    Inspect WARN/FAIL cases qualitatively, especially failure tags and answer text.
 4. Use `results/evaluation_output.csv`.
    Cross-check full-population scores, flags, and grade distribution.
-5. Generate `results/reviewer_report.html` if a browser view is useful.
+5. Generate the derived reviewer package if a browser view or structured convenience summary is useful.
    Treat it as a local reader for the same artifacts, not a new result.
 6. Inspect `results/raw_generations.jsonl` only when you need full prompt/answer audit detail.
 
-## Generate The Reviewer Report
+## Generate The Reviewer Package
 
-The report is self-contained HTML and is ignored by git.
+The package is self-contained, local, and ignored by git. It writes outside canonical `results/` by default.
 
 ```bash
-make reviewer-report
+make reviewer-package
 ```
 
 Equivalent direct command:
 
 ```bash
-python src/build_reviewer_report.py --results-dir results --output results/reviewer_report.html
+python src/build_reviewer_report.py --results-dir results
 ```
 
-Open `results/reviewer_report.html` in a browser. The report validates manifest/evaluation run identity and overlapping fields between `evaluation_output.csv` and `flagged_cases.jsonl` before rendering.
+Default output:
+
+```text
+reviewer_packages/<provider>_<model_id>_<run_id>/
+├── reviewer_report.html
+└── reviewer_summary.json
+```
+
+Open `reviewer_report.html` in a browser. The package validates manifest/evaluation run identity, completed-run source artifact presence, and overlapping fields between `evaluation_output.csv` and `flagged_cases.jsonl` before rendering.
+
+The older `make reviewer-report` target remains as an alias for `make reviewer-package`.
 
 ## Common Mistakes
 
 - Do not treat PASS as proof that a model is clinically safe.
 - Do not treat WARN/FAIL as clinician adjudication; they are heuristic review signals.
 - Do not use `flagged_cases.jsonl` as the denominator for rates; use `evaluation_output.csv`.
-- Do not treat `reviewer_report.html` as canonical. Regenerate it from artifacts when needed.
+- Do not treat the reviewer package as canonical. Regenerate it from artifacts when needed.
+- Do not check generated reviewer packages into `results/`.
 - Do not compare sandbox, candidate, and published runs without checking `run_manifest.json`.
 - Do not treat `results/cache/raw_generations_cache.jsonl` as the published benchmark set.

@@ -81,7 +81,7 @@ clinical-AI-eval_sandbox/
 │   ├── metrics.py                  # Scoring and safety flags
 │   ├── run_evaluation.py           # Applies metrics to generations
 │   ├── summarize_results.py        # Builds markdown summary
-│   └── build_reviewer_report.py    # Builds derived local HTML reviewer report
+│   └── build_reviewer_report.py    # Builds derived local reviewer package
 ├── results/
 │   ├── raw_generations.jsonl       # One explicit published provider/model/run
 │   ├── run_manifest.json           # Published run identity and provenance
@@ -94,6 +94,7 @@ clinical-AI-eval_sandbox/
 │   ├── architecture.md             # System overview
 │   ├── artifacts_guide.md          # File-by-file artifact guide
 │   ├── REVIEWER_WORKFLOW.md        # Artifact trust map and review order
+│   ├── reviewer_package.md         # Derived reviewer package boundaries and usage
 │   ├── reviewer_guide.md           # Fast reviewer walkthrough
 │   ├── results_interpretation.md   # Benchmark interpretation guidance
 │   ├── safety_case.md              # Safety framing and hazards
@@ -141,15 +142,21 @@ The main review artifacts are:
 - `results/summary.md`: compact benchmark report with rates, means, and worst cases
 - `results/cache/raw_generations_cache.jsonl`: reusable raw-generation cache/history store that is not itself the public benchmark set
 
-The HTML reviewer report is a generated convenience view, not a canonical benchmark artifact. It is derived from `run_manifest.json`, `evaluation_output.csv`, and `flagged_cases.jsonl` without changing scoring, prompts, datasets, or published artifact meaning.
+The reviewer package is a generated convenience view, not a canonical benchmark artifact. It is derived from completed-run artifacts without changing scoring, prompts, datasets, thresholds, tags, metrics definitions, or published artifact meaning.
 
 To generate it locally:
 
 ```bash
-python src/build_reviewer_report.py --results-dir results --output results/reviewer_report.html
+make reviewer-package
 ```
 
-Then open `results/reviewer_report.html` in a browser. The file is self-contained, ignored by git, and includes run metadata, grade distribution, failure tag counts, a filterable flagged-case table, and per-case details for the validated overlap fields.
+Equivalent direct command:
+
+```bash
+python src/build_reviewer_report.py --results-dir results
+```
+
+Then open `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_report.html` in a browser. The package is ignored by git and also includes `reviewer_summary.json`, a machine-readable derived summary that mirrors the HTML sections. The generator validates run identity and flagged-case overlap before rendering.
 
 ## Current Published Run
 
@@ -255,6 +262,7 @@ The multi-provider support above exists at the generation-script layer. The chec
 - `docs/architecture.md`: architecture, modules, and data flow
 - `docs/artifacts_guide.md`: what each results artifact contains and how to read it
 - `docs/REVIEWER_WORKFLOW.md`: step-by-step artifact review order and source-of-truth guidance
+- `docs/reviewer_package.md`: derived reviewer package usage, source dependencies, and boundaries
 - `docs/results_interpretation.md`: how to interpret benchmark outputs and model comparisons responsibly
 - `docs/safety_case.md`: safety framing, hazards, and mitigations
 - `docs/failure_modes.md`: common failure categories plus known v1 limitations

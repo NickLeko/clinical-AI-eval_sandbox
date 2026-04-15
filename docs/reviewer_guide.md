@@ -20,6 +20,10 @@ Read this file if you want the fastest review path through the repo and the most
 3a. Optional: read `docs/results_interpretation.md`
 - Use this if you want guardrails for interpreting PASS/WARN/FAIL, safety rates, and model comparisons.
 
+3b. Optional: generate the reviewer package
+- Run `make reviewer-package` if you want a browser-friendly derived view with run provenance, source links, score summaries, review-first cases, and flagged-case detail sections.
+- Treat `reviewer_packages/.../reviewer_report.html` and `reviewer_summary.json` as convenience outputs only, not canonical results.
+
 4. Read `docs/failure_modes.md`
 - Understand what kinds of failures the benchmark is designed to surface.
 

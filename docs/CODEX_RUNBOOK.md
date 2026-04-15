@@ -37,7 +37,7 @@ During validation:
 
 - Run focused tests for the changed area.
 - Run `make verify` or the equivalent unittest and py_compile commands.
-- For derived reports, generate to a local ignored path or `/tmp` unless asked to update a checked-in artifact.
+- For derived reviewer packages, generate to `reviewer_packages/`, a custom ignored path, or `/tmp` unless explicitly asked to inspect another location.
 
 During documentation:
 

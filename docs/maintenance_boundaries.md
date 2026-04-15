@@ -44,6 +44,7 @@ Safe maintenance usually includes:
 - formatting and information hierarchy fixes
 - explicit scope and limitation notes
 - reviewer guidance for interpreting artifacts
+- derived reviewer-package tooling that reads completed artifacts without changing benchmark logic
 
 ## Change Taxonomy
 
@@ -58,6 +59,7 @@ Examples:
 - reviewer guides
 - artifact-reading guidance
 - wording cleanups that preserve claims exactly
+- generated reviewer packages under `reviewer_packages/` when they are not checked into canonical `results/`
 
 ### Benchmark revision
 
@@ -95,6 +97,7 @@ The following should be treated as benchmark revisions, not routine cleanup:
 - changing scoring thresholds, heuristics, or flag definitions
 - changing summary calculations or benchmark tables
 - regenerating or replacing `results/` artifacts
+- treating generated reviewer-package files as canonical benchmark outputs
 
 If one of these changes is needed, it should be called out explicitly in the PR or commit message as an evaluation revision.
 
