@@ -2,7 +2,7 @@
 
 This document explains what each benchmark artifact contains, how a reviewer should read it, and what each file does and does not imply.
 
-Read this file if you want a file-by-file guide to the outputs under `results/`.
+Read this file if you want a file-by-file guide to the canonical outputs under `results/` and the derived reviewer package under `reviewer_packages/`.
 
 ## Artifact Set
 

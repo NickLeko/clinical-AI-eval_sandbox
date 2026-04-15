@@ -261,7 +261,11 @@ def main(top_n: int, results_dir: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Summarize evaluation results into Markdown.")
     parser.add_argument("--top-n", type=int, default=10, help="Number of worst cases to list.")
-    parser.add_argument("--results-dir", default="results", help="Directory containing published artifacts.")
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory containing evaluated run artifacts, such as results/ or sandbox_results/.",
+    )
     args = parser.parse_args()
 
     main(top_n=args.top_n, results_dir=args.results_dir)

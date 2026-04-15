@@ -43,6 +43,8 @@ dataset/clinical_questions.csv
 -> results/evaluation_output.csv + results/flagged_cases.jsonl
 -> src/summarize_results.py
 -> results/summary.md
+-> src/build_reviewer_report.py
+-> reviewer_packages/.../reviewer_report.html + reviewer_summary.json
 
 Reusable raw-generation cache is stored separately at:
 results/cache/raw_generations_cache.jsonl
@@ -151,6 +153,33 @@ Includes:
 - failure tag counts
 - worst performing cases
 
+### 6. Derived reviewer package layer
+
+Location: `src/build_reviewer_report.py`
+
+Creates a non-canonical reviewer package from a completed run. This layer is a
+read-only convenience view over existing artifacts; it does not rescore cases,
+change artifact meaning, or replace canonical outputs.
+
+Primary outputs:
+
+- `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_report.html`
+- `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_summary.json`
+
+Source artifacts:
+
+- `results/run_manifest.json`
+- `results/evaluation_output.csv`
+- `results/flagged_cases.jsonl`
+- `results/summary.md`
+- `results/raw_generations.jsonl`
+
+Design intent:
+
+- make human review faster
+- preserve source artifact provenance and links
+- keep derived reviewer views outside canonical `results/`
+
 ## Benchmark-Defining vs Explanatory Files
 
 These files define benchmark meaning and should not be edited casually:
@@ -161,6 +190,9 @@ These files define benchmark meaning and should not be edited casually:
 - `src/metrics.py`
 - `src/run_evaluation.py`
 - `results/`
+
+Generated reviewer packages under `reviewer_packages/` are derived convenience
+outputs, not benchmark-defining artifacts.
 
 This document, by contrast, is explanatory. It should help reviewers understand the system without changing evaluation semantics.
 
@@ -184,6 +216,7 @@ High-level workflow:
 - offline verification for checked-in published artifacts
 - sandbox runs for exploratory or mock-backed evaluation
 - published benchmark candidate generation with full-dataset guardrails and reproducibility checks
+- derived reviewer package generation for local or uploaded human inspection
 
 The checked-in `results/` directory represents the canonical published benchmark set. Published candidates are intended for manual review before repo-tracked artifacts are updated.
 
@@ -209,4 +242,5 @@ This project should be interpreted as an evaluation prototype and portfolio arti
 - Read `docs/safety_case.md` for safety framing and non-claims.
 - Read `docs/failure_modes.md` for failure taxonomy and the documented v1 limitation.
 - Read `docs/notable_failures.md` for representative examples.
+- Read `docs/reviewer_package.md` for derived package usage and boundaries.
 - Read `docs/maintenance_boundaries.md` for protected benchmark areas.

@@ -28,9 +28,10 @@ Use `results/flagged_cases.jsonl` for the exact answer text and evidence. Histor
 
 The current flagged cases reinforce several safety-relevant review themes.
 
-- hallucinations can translate into unsafe clinical actions
+- unsupported or over-specific clinical detail can make a grounded-looking answer sound more authoritative than the evidence supports
 - refusal and escalation behavior need explicit evaluation rather than assumption
 - evidence-grounding claims should be backed by inspectable artifacts, not just top-line metrics
+- sparse-context over-elaboration can be review-worthy even when it does not rise to a hard unsafe-action failure
 
 ## Case-Grounded Review Notes
 

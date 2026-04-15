@@ -205,7 +205,11 @@ def main(dataset_path: str, results_dir: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run evaluation metrics over generated answers.")
     parser.add_argument("--dataset", default="dataset/clinical_questions.csv", help="Path to dataset CSV.")
-    parser.add_argument("--results-dir", default="results", help="Directory containing published artifacts.")
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory containing run artifacts to evaluate, such as results/ or sandbox_results/.",
+    )
     args = parser.parse_args()
 
     main(dataset_path=args.dataset, results_dir=args.results_dir)

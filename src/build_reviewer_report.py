@@ -75,6 +75,9 @@ FLAG_FIELDS = [
     "unsafe_recommendation",
     "refusal_failure",
 ]
+SUPPORTING_SCORE_FIELD_LABELS = {
+    "gold_key_points_coverage": "supporting; not grade-driving",
+}
 
 
 @dataclass(frozen=True)
@@ -347,16 +350,37 @@ def lowest_metric(scores: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     value, metric = sorted(numeric_scores, key=lambda item: (item[0], item[1]))[0]
-    return {"metric": metric, "value": round(value, 6)}
+    item: dict[str, Any] = {
+        "metric": metric,
+        "display_name": metric_display_name(metric),
+        "value": round(value, 6),
+    }
+    note = metric_interpretation_note(metric)
+    if note:
+        item["interpretation_note"] = note
+    return item
 
 
 def format_metric(metric: dict[str, Any] | None) -> str:
     if not metric:
         return ""
+    metric_name = metric_display_name(metric.get("metric", ""))
     value = metric.get("value")
     if isinstance(value, (int, float)):
-        return f"{metric.get('metric', '')}={value:.3f}"
-    return f"{metric.get('metric', '')}={value}"
+        return f"{metric_name}={value:.3f}"
+    return f"{metric_name}={value}"
+
+
+def metric_display_name(metric: Any) -> str:
+    metric_name = str(metric or "")
+    label = metric_interpretation_note(metric_name)
+    if label:
+        return f"{metric_name} ({label})"
+    return metric_name
+
+
+def metric_interpretation_note(metric: Any) -> str:
+    return SUPPORTING_SCORE_FIELD_LABELS.get(str(metric or ""), "")
 
 
 def build_priority_reason(case: dict[str, Any]) -> str:
@@ -368,7 +392,7 @@ def build_priority_reason(case: dict[str, Any]) -> str:
         parts.append(f"tags={', '.join(tags)}")
     metric = lowest_metric(case.get("scores", {}))
     if metric:
-        parts.append(f"lowest displayed metric {format_metric(metric)}")
+        parts.append(f"orientation metric {format_metric(metric)}")
     return "; ".join(parts)
 
 
@@ -598,15 +622,18 @@ def build_metric_summary(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         values = [value for row in rows if (value := parse_float(row.get(field))) is not None]
         if not values:
             continue
-        summaries.append(
-            {
-                "metric": field,
-                "count": len(values),
-                "mean": round(sum(values) / len(values), 6),
-                "min": round(min(values), 6),
-                "max": round(max(values), 6),
-            }
-        )
+        item: dict[str, Any] = {
+            "metric": field,
+            "display_name": metric_display_name(field),
+            "count": len(values),
+            "mean": round(sum(values) / len(values), 6),
+            "min": round(min(values), 6),
+            "max": round(max(values), 6),
+        }
+        note = metric_interpretation_note(field)
+        if note:
+            item["interpretation_note"] = note
+        summaries.append(item)
     return summaries
 
 
@@ -855,7 +882,7 @@ def render_metric_summary(summary: dict[str, Any]) -> str:
     for item in summary["metric_summary"]:
         rows.append(
             "<tr>"
-            f"<th scope=\"row\"><code>{esc(item['metric'])}</code></th>"
+            f"<th scope=\"row\"><code>{esc(item.get('display_name') or metric_display_name(item['metric']))}</code></th>"
             f"<td>{number(item.get('mean'))}</td>"
             f"<td>{number(item.get('min'))}</td>"
             f"<td>{number(item.get('max'))}</td>"
@@ -863,6 +890,9 @@ def render_metric_summary(summary: dict[str, Any]) -> str:
             "</tr>"
         )
     return (
+        '<p class="muted">Metric summaries are reviewer orientation only. '
+        '<code>gold_key_points_coverage</code> is a supporting checklist-style metric and is not '
+        'grade-driving by itself.</p>'
         "<table><thead><tr><th>Metric</th><th>Mean</th><th>Min</th><th>Max</th><th>Rows</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
@@ -938,10 +968,11 @@ def render_review_first(summary: dict[str, Any]) -> str:
             "</tr>"
         )
     return (
-        '<p class="muted">Review order is a convenience heuristic using only existing grade, risk, tag, and metric '
-        "fields. It is not a new benchmark score.</p>"
+        '<p class="muted">Review order is convenience-only: it is not a severity label, benchmark score, '
+        'or grade-driving rule. The metric column is an orientation aid; supporting metrics such as '
+        '<code>gold_key_points_coverage</code> do not create or change grades.</p>'
         "<table><thead><tr><th>Rank</th><th>Case</th><th>Grade</th><th>Category</th><th>Risk</th>"
-        "<th>Failure tags</th><th>Lowest displayed metric</th><th>Reason</th></tr></thead>"
+        "<th>Failure tags</th><th>Orientation metric</th><th>Reason</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
@@ -968,7 +999,7 @@ def render_case_index(summary: dict[str, Any]) -> str:
         )
     return (
         "<table><thead><tr><th>Case</th><th>Grade</th><th>Category</th><th>Risk</th>"
-        "<th>Expected behavior</th><th>Failure tags</th><th>Lowest displayed metric</th>"
+        "<th>Expected behavior</th><th>Failure tags</th><th>Orientation metric</th>"
         "<th>Flagged detail</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
@@ -977,6 +1008,8 @@ def render_case_index(summary: dict[str, Any]) -> str:
 def render_scores_or_flags(items: dict[str, Any], label: str) -> str:
     if not items:
         return f'<p class="muted">No {esc(label)} fields were available.</p>'
+    if label == "score":
+        return render_definition_list([(metric_display_name(field), value) for field, value in items.items()])
     return render_definition_list([(field, value) for field, value in items.items()])
 
 

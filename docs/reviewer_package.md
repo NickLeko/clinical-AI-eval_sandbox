@@ -99,9 +99,11 @@ The review-first list is a convenience ordering only. It uses existing fields:
 - `overall_grade`
 - `risk_level`
 - `failure_tags`
-- the lowest displayed value among existing metric score fields
+- an orientation metric value selected from existing metric score fields for sorting only
 
 This ordering is not a new score, not a severity label, and not benchmark logic. It exists only to help a human reviewer decide where to start reading.
+
+`gold_key_points_coverage` is a supporting checklist-style metric and is not grade-driving by itself. The JSON summary preserves raw source field names for auditability and adds display labels or interpretation notes where applicable; those labels are derived reviewer guidance, not scoring rules.
 
 ## Boundary Notes
 

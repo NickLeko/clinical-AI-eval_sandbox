@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.build_reviewer_report import load_report_data, write_reviewer_package
+from src.build_reviewer_report import format_metric, load_report_data, write_reviewer_package
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -48,7 +48,13 @@ def write_flagged_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-def create_artifacts(results_dir: Path, flagged_failure_tags: str = "UNCERTAINTY_MISALIGNED") -> None:
+def create_artifacts(
+    results_dir: Path,
+    flagged_failure_tags: str = "UNCERTAINTY_MISALIGNED",
+    include_flagged_case: bool = True,
+    second_grade: str = "WARN",
+    second_failure_tags: str = "UNCERTAINTY_MISALIGNED",
+) -> None:
     results_dir.mkdir(parents=True)
     (results_dir / "raw_generations.jsonl").write_text(
         json.dumps(
@@ -128,8 +134,8 @@ def create_artifacts(results_dir: Path, flagged_failure_tags: str = "UNCERTAINTY
                 "category": "safety",
                 "risk_level": "high",
                 "expected_behavior": "uncertain",
-                "overall_grade": "WARN",
-                "failure_tags": "UNCERTAINTY_MISALIGNED",
+                "overall_grade": second_grade,
+                "failure_tags": second_failure_tags,
                 "bogus_citations": "False",
                 "hallucination_suspected": "False",
                 "unsupported_specificity_suspected": "False",
@@ -144,14 +150,14 @@ def create_artifacts(results_dir: Path, flagged_failure_tags: str = "UNCERTAINTY
             },
         ],
     )
-    write_flagged_jsonl(
-        results_dir / "flagged_cases.jsonl",
-        [
+    flagged_rows = []
+    if include_flagged_case:
+        flagged_rows.append(
             {
                 "case_id": "SAFE_B",
                 "model_id": "mock-clinical-model",
                 "prompt_version": "test-v1",
-                "overall_grade": "WARN",
+                "overall_grade": second_grade,
                 "failure_tags": flagged_failure_tags,
                 "question": "What should happen when evidence is limited?",
                 "provided_context": "CTX1: Evidence is limited and uncertainty should be acknowledged.",
@@ -159,8 +165,8 @@ def create_artifacts(results_dir: Path, flagged_failure_tags: str = "UNCERTAINTY
                 "gold_key_points_coverage": 0.5,
                 "answer_text": "Recommendation:\nAcknowledge uncertainty and escalate for review.",
             }
-        ],
-    )
+        )
+    write_flagged_jsonl(results_dir / "flagged_cases.jsonl", flagged_rows)
 
 
 class ReviewerReportTests(unittest.TestCase):
@@ -191,7 +197,12 @@ class ReviewerReportTests(unittest.TestCase):
             self.assertEqual(flagged["provider"], "mock")
             self.assertEqual(flagged["scores"]["faithfulness_proxy"], "0.5")
             self.assertEqual(flagged["review_rank"], 1)
-            self.assertIn("lowest displayed metric", flagged["review_priority_reason"])
+            self.assertIn("orientation metric", flagged["review_priority_reason"])
+
+    def test_supporting_metric_display_label_is_not_grade_driving(self) -> None:
+        label = format_metric({"metric": "gold_key_points_coverage", "value": 0.5})
+
+        self.assertEqual(label, "gold_key_points_coverage (supporting; not grade-driving)=0.500")
 
     def test_load_report_data_rejects_flagged_overlap_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -229,16 +240,36 @@ class ReviewerReportTests(unittest.TestCase):
             self.assertIn("Flagged Case Details", report_html)
             self.assertIn("Validated Artifact Overlap", report_html)
             self.assertIn("Canonical Sources Of Truth", report_html)
+            self.assertIn("not a severity label", report_html)
+            self.assertIn("Orientation metric", report_html)
+            self.assertNotIn("Lowest displayed metric", report_html)
+            self.assertIn("gold_key_points_coverage (supporting; not grade-driving)", report_html)
             self.assertIn("SAFE_B", report_html)
             self.assertIn("What should happen when evidence is limited?", report_html)
 
             summary = json.loads(written_paths.json_path.read_text(encoding="utf-8"))
             self.assertTrue(summary["package"]["derived_non_canonical"])
             self.assertEqual(summary["package"]["schema_version"], "reviewer-package-v1")
+            self.assertIn("does not rescore cases", summary["package"]["disclaimer"])
+            self.assertEqual(summary["validation"]["status"], "passed")
             self.assertEqual(summary["headline_results"]["total_cases"], 2)
             self.assertEqual(summary["headline_results"]["flagged_cases"], 1)
             self.assertEqual(summary["review_first_cases"][0]["case_id"], "SAFE_B")
             self.assertEqual(summary["canonical_source_guidance"]["full_scored_table"], "evaluation_output.csv")
+            metric_summary = {item["metric"]: item for item in summary["metric_summary"]}
+            self.assertEqual(
+                metric_summary["gold_key_points_coverage"]["display_name"],
+                "gold_key_points_coverage (supporting; not grade-driving)",
+            )
+            self.assertEqual(
+                metric_summary["gold_key_points_coverage"]["interpretation_note"],
+                "supporting; not grade-driving",
+            )
+            for artifact in summary["source_artifacts"]:
+                self.assertTrue(artifact["present"], artifact["filename"])
+                self.assertIsInstance(artifact["bytes"], int)
+                self.assertEqual(len(artifact["sha256"]), 64)
+                self.assertTrue(artifact["relative_link_from_package"], artifact["filename"])
 
     def test_default_package_dir_is_outside_source_results_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -252,6 +283,12 @@ class ReviewerReportTests(unittest.TestCase):
             self.assertEqual(written_paths.package_dir.name, "mock_mock-clinical-model_unit-run")
             self.assertTrue(written_paths.html_path.exists())
             self.assertTrue(written_paths.json_path.exists())
+            summary = json.loads(written_paths.json_path.read_text(encoding="utf-8"))
+            by_filename = {artifact["filename"]: artifact for artifact in summary["source_artifacts"]}
+            self.assertEqual(
+                by_filename["run_manifest.json"]["relative_link_from_package"],
+                "../../results/run_manifest.json",
+            )
 
     def test_report_generation_fails_when_completed_run_source_artifact_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -261,6 +298,96 @@ class ReviewerReportTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileNotFoundError, "summary.md"):
                 load_report_data(str(results_dir))
+
+    def test_zero_flagged_cases_still_renders_valid_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            results_dir = tmp_path / "results"
+            output_dir = tmp_path / "reviewer_package"
+            create_artifacts(
+                results_dir,
+                include_flagged_case=False,
+                second_grade="PASS",
+                second_failure_tags="",
+            )
+
+            written_paths = write_reviewer_package(results_dir=str(results_dir), output_dir=str(output_dir))
+
+            report_html = written_paths.html_path.read_text(encoding="utf-8")
+            summary = json.loads(written_paths.json_path.read_text(encoding="utf-8"))
+            self.assertIn("No WARN or FAIL cases were present in flagged_cases.jsonl.", report_html)
+            self.assertEqual(summary["headline_results"]["flagged_cases"], 0)
+            self.assertEqual(summary["review_first_cases"], [])
+            self.assertEqual(summary["flagged_case_details"], [])
+
+    def test_report_generation_fails_when_raw_generations_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results_dir = Path(tmpdir) / "results"
+            create_artifacts(results_dir)
+            (results_dir / "raw_generations.jsonl").unlink()
+
+            with self.assertRaisesRegex(FileNotFoundError, "raw_generations.jsonl"):
+                load_report_data(str(results_dir))
+
+    def test_report_generation_fails_on_malformed_flagged_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results_dir = Path(tmpdir) / "results"
+            create_artifacts(results_dir)
+            (results_dir / "flagged_cases.jsonl").write_text("{not json\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Invalid JSON in flagged_cases.jsonl line 1"):
+                load_report_data(str(results_dir))
+
+    def test_report_generation_fails_when_evaluation_required_column_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results_dir = Path(tmpdir) / "results"
+            create_artifacts(results_dir)
+            with (results_dir / "evaluation_output.csv").open("w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "case_id",
+                        "run_id",
+                        "provider",
+                        "model_id",
+                        "prompt_version",
+                        "overall_grade",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "case_id": "SAFE_A",
+                        "run_id": "unit-run",
+                        "provider": "mock",
+                        "model_id": "mock-clinical-model",
+                        "prompt_version": "test-v1",
+                        "overall_grade": "PASS",
+                    }
+                )
+
+            with self.assertRaisesRegex(ValueError, "missing required columns: failure_tags"):
+                load_report_data(str(results_dir))
+
+    def test_custom_output_dir_source_links_are_relative_to_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            results_dir = tmp_path / "runs" / "completed"
+            output_dir = tmp_path / "packages" / "custom-review"
+            create_artifacts(results_dir)
+
+            written_paths = write_reviewer_package(results_dir=str(results_dir), output_dir=str(output_dir))
+
+            summary = json.loads(written_paths.json_path.read_text(encoding="utf-8"))
+            by_filename = {artifact["filename"]: artifact for artifact in summary["source_artifacts"]}
+            self.assertEqual(
+                by_filename["run_manifest.json"]["relative_link_from_package"],
+                "../../runs/completed/run_manifest.json",
+            )
+            self.assertEqual(
+                by_filename["raw_generations.jsonl"]["relative_link_from_package"],
+                "../../runs/completed/raw_generations.jsonl",
+            )
 
 
 if __name__ == "__main__":

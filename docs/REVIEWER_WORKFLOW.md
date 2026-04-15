@@ -20,12 +20,12 @@ Use this workflow to inspect one run without confusing canonical artifacts, deri
    Confirm `provider`, `model_id`, `run_id`, `prompt_version`, `benchmark_status`, and dataset coverage before trusting any other artifact.
 2. Read `results/summary.md` if present.
    Use it for orientation only.
-3. Open `results/flagged_cases.jsonl`.
-   Inspect WARN/FAIL cases qualitatively, especially failure tags and answer text.
-4. Use `results/evaluation_output.csv`.
-   Cross-check full-population scores, flags, and grade distribution.
-5. Generate the derived reviewer package if a browser view or structured convenience summary is useful.
+3. Generate the derived reviewer package if a browser view or structured convenience summary is useful.
    Treat it as a local reader for the same artifacts, not a new result.
+4. Open `results/flagged_cases.jsonl`.
+   Inspect WARN/FAIL cases qualitatively, especially failure tags and answer text.
+5. Use `results/evaluation_output.csv`.
+   Cross-check full-population scores, flags, and grade distribution.
 6. Inspect `results/raw_generations.jsonl` only when you need full prompt/answer audit detail.
 
 ## Generate The Reviewer Package

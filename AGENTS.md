@@ -58,11 +58,14 @@ The helper target is equivalent:
 make verify
 ```
 
-To generate the derived local HTML reviewer report:
+To generate the derived local reviewer package:
 
 ```bash
-make reviewer-report
+make reviewer-package
 ```
+
+The legacy `make reviewer-report` target remains an alias, but new docs and commands
+should use `make reviewer-package`.
 
 ## Documentation Expectations
 
@@ -70,6 +73,7 @@ make reviewer-report
 - `docs/artifacts_guide.md` is for artifact interpretation.
 - `docs/reviewer_guide.md` is for reviewer walkthroughs.
 - `docs/REVIEWER_WORKFLOW.md` is for artifact trust boundaries and review order.
+- `docs/reviewer_package.md` is for derived reviewer package usage and boundaries.
 - `docs/maintenance_boundaries.md` is for protected benchmark meaning.
 - `docs/CODEX_RUNBOOK.md` is for Codex operating workflow.
 

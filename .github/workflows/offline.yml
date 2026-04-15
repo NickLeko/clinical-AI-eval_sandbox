@@ -60,3 +60,9 @@ jobs:
             results/flagged_cases.jsonl \
             results/summary.md \
             results/run_manifest.json
+
+      - name: Build derived reviewer package smoke check
+        run: |
+          python src/build_reviewer_report.py \
+            --results-dir results \
+            --output-dir /tmp/clinical-ai-reviewer-package

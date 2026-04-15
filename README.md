@@ -115,8 +115,9 @@ For a first pass, a reviewer can understand the project in this order:
 1. Read this README for project scope, benchmark boundaries, and artifact map.
 2. Use `docs/REVIEWER_WORKFLOW.md` for the exact artifact review order and source-of-truth guidance.
 3. Open `results/summary.md` for the headline benchmark view.
-4. Check `docs/failure_modes.md` and `docs/notable_failures.md` for safety interpretation.
-5. Inspect `src/metrics.py`, `src/run_evaluation.py`, and `src/prompt_templates.py` if they want to audit the benchmark mechanics.
+4. Generate the derived reviewer package if a browser-friendly navigation layer is useful.
+5. Check `docs/failure_modes.md` and `docs/notable_failures.md` for safety interpretation.
+6. Inspect `src/metrics.py`, `src/run_evaluation.py`, and `src/prompt_templates.py` if they want to audit the benchmark mechanics.
 
 ## Evaluation Pipeline
 
