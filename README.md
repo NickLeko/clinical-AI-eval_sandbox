@@ -1,26 +1,39 @@
 # Clinical AI Evaluation Sandbox
 
-A lightweight, safety-oriented evaluation harness for testing how LLMs behave in clinical decision-support scenarios before deployment.
+A lightweight, safety-oriented evaluation harness for testing how LLMs behave in controlled clinical decision-support scenarios.
 
-This repository is meant to signal evaluation judgment, safety-first thinking, and disciplined benchmark communication. It is not a medical device, not a clinical product, and not for patient care.
+This repository is an evaluation artifact. It is not a medical device, not a clinical product, and not for patient care.
 
-Read this file if you want the fastest overview of what the project is, what it evaluates, what artifacts it produces, and what it does not claim.
+## Published Run Snapshot
 
-The checked-in public artifacts represent one explicit canonical published run:
+Checked-in canonical published run, from `results/run_manifest.json` and `results/summary.md`:
 
-- provider: `openai`
-- model: `gpt-4o`
-- run_id: `20260305_045410`
-- cases scored: `25`
+| Field | Current checked-in value |
+|---|---:|
+| Provider / model | `openai` / `gpt-4o` |
+| Run ID | `20260305_045410` |
+| Scored cases | `25 / 25` |
+| PASS / WARN / FAIL | `22 / 3 / 0` |
+| Unsafe recommendation rate | `0.0%` |
+| Hallucination suspicion rate | `0.0%` |
+| Refusal failure rate | `0.0%` |
+| Mean faithfulness proxy | `0.866` |
+| Mean uncertainty alignment | `0.932` |
+
+Guardrail: these are heuristic evaluator outputs for one explicit published run. They are not evidence of clinical safety or deployment readiness.
+The checked-in published artifacts reflect the current stricter evaluator rules, including non-empty section checks and rationale-scoped required citations.
 
 Historical raw generations used for cache/reproducibility are stored separately under `results/cache/` and are not the published benchmark result set.
 
-The generation layer currently supports these providers:
+## Start Here
 
-- `openai`
-- `anthropic`
-- `gemini`
-- `mock`
+For the fastest review path:
+
+1. First click: [`results/summary.md`](results/summary.md) for the scorecard, safety-style rates, failure tags, and worst cases.
+2. Read [`docs/REVIEWER_WORKFLOW.md`](docs/REVIEWER_WORKFLOW.md) for artifact trust boundaries and review order.
+3. Check [`docs/notable_failures.md`](docs/notable_failures.md) for representative WARN cases and scoring-boundary notes.
+4. Use [`docs/safety_case.md`](docs/safety_case.md) for hazard framing, mitigations, and non-claims.
+5. Use [`docs/artifacts_guide.md`](docs/artifacts_guide.md) when inspecting individual result files.
 
 ## What This Project Is
 
@@ -33,18 +46,6 @@ This project simulates a pre-deployment healthcare AI evaluation workflow:
 - summarize benchmark artifacts for reviewer inspection
 
 The goal is not to build a medical model. The goal is to build a credible evaluation sandbox that shows how a healthcare AI team might risk-test an LLM before workflow integration.
-
-## Why It Matters
-
-Clinical AI evaluation cannot rely on accuracy alone. This sandbox focuses on signals that matter in healthcare settings:
-
-- faithfulness to provided context
-- citation validity
-- uncertainty and refusal behavior
-- unsafe recommendation detection
-- reviewer-friendly failure analysis
-
-The repo is intentionally small, auditable, and portfolio-friendly rather than production-complete.
 
 ## What It Evaluates
 
@@ -67,6 +68,18 @@ This repository does not claim:
 - real-world deployment approval
 
 Faithfulness and safety checks are heuristic by design. Results should be interpreted as a controlled evaluation artifact, not as proof that a model is clinically safe.
+
+## Why It Matters
+
+Clinical AI evaluation cannot rely on accuracy alone. This sandbox focuses on signals that matter in healthcare settings:
+
+- faithfulness to provided context
+- citation validity
+- uncertainty and refusal behavior
+- unsafe recommendation detection
+- reviewer-friendly failure analysis
+
+The repo is intentionally small, auditable, and governance-oriented rather than production-complete.
 
 ## 2-Minute Repo Map
 
@@ -108,17 +121,6 @@ clinical-AI-eval_sandbox/
 └── README.md
 ```
 
-## Likely Reviewer Workflow
-
-For a first pass, a reviewer can understand the project in this order:
-
-1. Read this README for project scope, benchmark boundaries, and artifact map.
-2. Use `docs/REVIEWER_WORKFLOW.md` for the exact artifact review order and source-of-truth guidance.
-3. Open `results/summary.md` for the headline benchmark view.
-4. Generate the derived reviewer package if a browser-friendly navigation layer is useful.
-5. Check `docs/failure_modes.md` and `docs/notable_failures.md` for safety interpretation.
-6. Inspect `src/metrics.py`, `src/run_evaluation.py`, and `src/prompt_templates.py` if they want to audit the benchmark mechanics.
-
 ## Evaluation Pipeline
 
 ```text
@@ -158,20 +160,6 @@ python src/build_reviewer_report.py --results-dir results
 ```
 
 Then open `reviewer_packages/<provider>_<model_id>_<run_id>/reviewer_report.html` in a browser. The package is ignored by git and also includes `reviewer_summary.json`, a machine-readable derived summary that mirrors the HTML sections. The generator validates run identity and flagged-case overlap before rendering.
-
-## Current Published Run
-
-The checked-in benchmark artifacts currently publish one explicit run:
-
-- provider: `openai`
-- model: `gpt-4o`
-- run_id: `20260305_045410`
-- dataset rows scored: `25`
-
-Use `results/run_manifest.json` and `results/summary.md` together when reviewing the public benchmark set.
-
-Important guardrail: a fully passing run on this heuristic benchmark is not evidence of clinical safety or deployment readiness.
-The checked-in published artifacts reflect the current stricter evaluator rules, including non-empty section checks and rationale-scoped required citations.
 
 ## Running The Project
 
@@ -297,7 +285,7 @@ See `docs/maintenance_boundaries.md` for the maintenance policy used in this rep
 - Human clinical review is outside the automated pipeline.
 - Historical cached raw generations are kept separate from the published benchmark result set.
 
-## Why This Repo Works As A Portfolio Artifact
+## Governance Signals
 
 It demonstrates:
 
